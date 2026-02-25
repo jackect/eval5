@@ -40,4 +40,22 @@ export type Node =
 	| ESTree.SwitchStatement
 	| ESTree.SwitchCase
 	| ESTree.LabeledStatement
-	| ESTree.DebuggerStatement;
+	| ESTree.DebuggerStatement
+	// ES6 node types
+	| ESTree.ArrowFunctionExpression
+	| ESTree.TemplateLiteral
+	| ESTree.TaggedTemplateExpression
+	| ESTree.TemplateElement
+	| ESTree.ArrayPattern
+	| ESTree.ObjectPattern
+	| ESTree.AssignmentPattern
+	| ESTree.RestElement
+	| ESTree.SpreadElement
+	| ESTree.ForOfStatement
+	| ESTree.ClassDeclaration
+	| ESTree.ClassExpression
+	| ESTree.ClassBody
+	| ESTree.MethodDefinition
+	| ESTree.Super
+	| ESTree.MetaProperty
+	| ESTree.Property;

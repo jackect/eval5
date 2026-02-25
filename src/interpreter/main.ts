@@ -206,23 +206,102 @@ class ContinueLabel {
  * functionScope
  *
  */
+
+// ES6: Variable metadata for let/const support
+interface VariableMeta {
+  kind: 'var' | 'let' | 'const';
+  initialized: boolean;
+}
+
 class Scope {
   readonly name: string | undefined | Symbol;
   readonly parent: Scope | null;
   readonly data: ScopeData;
+  readonly varMeta: Map<string, VariableMeta>;
+  readonly isBlockScope: boolean;
   labelStack: string[];
-  constructor(data: ScopeData, parent: Scope | null = null, name?: string | Symbol) {
+
+  constructor(
+    data: ScopeData,
+    parent: Scope | null = null,
+    name?: string | Symbol,
+    isBlockScope: boolean = false
+  ) {
     this.name = name;
     this.parent = parent;
     this.data = data;
     this.labelStack = [];
+    this.varMeta = new Map();
+    this.isBlockScope = isBlockScope;
+  }
+
+  // Find the function scope for var hoisting
+  findFunctionScope(): Scope {
+    let scope: Scope = this;
+    while (scope.isBlockScope && scope.parent) {
+      scope = scope.parent;
+    }
+    return scope;
+  }
+
+  // Declare a variable with kind tracking
+  declareVariable(name: string, kind: 'var' | 'let' | 'const', value?: any): void {
+    if (kind === 'var') {
+      // var hoists to function scope
+      const targetScope = this.findFunctionScope();
+      if (!(name in targetScope.data)) {
+        targetScope.data[name] = value;
+      }
+      targetScope.varMeta.set(name, { kind, initialized: value !== undefined });
+    } else {
+      // let/const stay in block scope
+      if (this.varMeta.has(name)) {
+        throw new SyntaxError(`Identifier '${name}' has already been declared`);
+      }
+      this.data[name] = value;
+      this.varMeta.set(name, { kind, initialized: value !== undefined });
+    }
+  }
+
+  // Check if variable can be assigned (const check)
+  canAssign(name: string): boolean {
+    const meta = this.getVariableMeta(name);
+    if (meta && meta.kind === 'const' && meta.initialized) {
+      return false;
+    }
+    return true;
+  }
+
+  // Get variable metadata from scope chain
+  getVariableMeta(name: string): VariableMeta | undefined {
+    let scope: Scope | null = this;
+    while (scope) {
+      if (scope.varMeta.has(name)) {
+        return scope.varMeta.get(name);
+      }
+      scope = scope.parent;
+    }
+    return undefined;
+  }
+
+  // Mark variable as initialized (for TDZ)
+  markInitialized(name: string): void {
+    let scope: Scope | null = this;
+    while (scope) {
+      if (scope.varMeta.has(name)) {
+        const meta = scope.varMeta.get(name)!;
+        meta.initialized = true;
+        return;
+      }
+      scope = scope.parent;
+    }
   }
 }
 
 function noop() { }
 
-function createScope(parent: Scope | null = null, name?: string): Scope {
-  return new Scope(Object.create(null), parent, name);
+function createScope(parent: Scope | null = null, name?: string, isBlockScope: boolean = false): Scope {
+  return new Scope(Object.create(null), parent, name, isBlockScope);
 }
 
 function createRootContext(data: Context): Context {
@@ -303,7 +382,7 @@ export class Interpreter {
   static readonly version: string = version;
   static readonly eval = internalEval;
   static readonly Function = internalFunction;
-  static ecmaVersion: ECMA_VERSION = 5;
+  static ecmaVersion: ECMA_VERSION = 6;
   // alert.call(globalContextInFunction, 1);
   // fix: alert.call({}, 1); // Illegal invocation
   // function func(){
@@ -680,6 +759,31 @@ export class Interpreter {
       case "DebuggerStatement":
         closure = this.debuggerStatementHandler(node);
         break;
+      // ES6 node types
+      case "ArrowFunctionExpression":
+        closure = this.arrowFunctionExpressionHandler(node);
+        break;
+      case "TemplateLiteral":
+        closure = this.templateLiteralHandler(node);
+        break;
+      case "TaggedTemplateExpression":
+        closure = this.taggedTemplateExpressionHandler(node);
+        break;
+      case "ForOfStatement":
+        closure = this.forOfStatementHandler(node);
+        break;
+      case "SpreadElement":
+        closure = this.spreadElementHandler(node);
+        break;
+      case "ClassDeclaration":
+        closure = this.classDeclarationHandler(node);
+        break;
+      case "ClassExpression":
+        closure = this.classExpressionHandler(node);
+        break;
+      case "Super":
+        closure = this.superHandler(node);
+        break;
       default:
         throw this.createInternalThrowError(Messages.NodeTypeSyntaxError, node.type, node);
     }
@@ -875,106 +979,144 @@ export class Interpreter {
     };
   }
 
-  // var o = {a: 1, b: 's', get name(){}, set name(){}  ...}
+  // var o = {a: 1, b: 's', get name(){}, set name(){}, ...obj, [computed]: val, method() {}  ...}
   protected objectExpressionHandler(node: ESTree.ObjectExpression) {
-    const items: {
-      key: string;
-      property: ESTree.Property;
-    }[] = [];
+    type PropertyItem = {
+      type: 'property';
+      keyGetter: () => string;
+      kind: 'init' | 'get' | 'set';
+      valueClosure: BaseClosure;
+      isMethod: boolean;
+      isAnonymousFunction: boolean;  // For setting function.name on anonymous functions
+    } | {
+      type: 'spread';
+      valueClosure: BaseClosure;
+    };
 
-    function getKey(keyNode: ESTree.Expression): string {
-      if (keyNode.type === "Identifier") {
-        // var o = {a:1}
-        return keyNode.name;
-      } else if (keyNode.type === "Literal") {
-        // var o = {"a":1}
-        return keyNode.value as string;
+    const items: PropertyItem[] = [];
+
+    for (const prop of node.properties as Array<ESTree.Property | ESTree.SpreadElement>) {
+      // ES6: Spread element {...obj}
+      if (prop.type === 'SpreadElement') {
+        items.push({
+          type: 'spread',
+          valueClosure: this.createClosure(prop.argument),
+        });
+        continue;
+      }
+
+      const property = prop as ESTree.Property;
+
+      // ES6: Computed property name {[expr]: value}
+      let keyGetter: () => string;
+      if (property.computed) {
+        const keyClosure = this.createClosure(property.key);
+        keyGetter = () => String(keyClosure());
+      } else if (property.key.type === 'Identifier') {
+        const keyName = property.key.name;
+        keyGetter = () => keyName;
       } else {
-        return this.throwError(Messages.ObjectStructureSyntaxError, keyNode.type, keyNode);
-      }
-    }
-    // collect value, getter, and/or setter.
-    const properties: {
-      [prop: string]: {
-        init?: BaseClosure;
-        get?: BaseClosure;
-        set?: BaseClosure;
-      };
-    } = Object.create(null);
-
-    node.properties.forEach(property => {
-      const kind = property.kind;
-      const key = getKey(property.key);
-
-      if (!properties[key] || kind === "init") {
-        properties[key] = {};
+        const keyValue = String((property.key as ESTree.Literal).value);
+        keyGetter = () => keyValue;
       }
 
-      properties[key][kind] = this.createClosure(property.value);
+      // ES6: Shorthand property {x} === {x: x}
+      let valueClosure: BaseClosure;
+      if (property.shorthand) {
+        valueClosure = this.identifierHandler(property.key as ESTree.Identifier);
+      } else {
+        valueClosure = this.createClosure(property.value);
+      }
+
+      // Check if this is an anonymous function expression (for function.name setting)
+      const isAnonymousFunction =
+        property.value.type === 'FunctionExpression' &&
+        !(property.value as ESTree.FunctionExpression).id;
 
       items.push({
-        key,
-        property,
+        type: 'property',
+        keyGetter,
+        kind: property.kind as 'init' | 'get' | 'set',
+        valueClosure,
+        isMethod: property.method || false,
+        isAnonymousFunction,
       });
-    });
+    }
 
     return () => {
-      const result = {};
-      const len = items.length;
+      const result: any = {};
+      const descriptors: Map<string, PropertyDescriptor> = new Map();
 
-      for (let i = 0; i < len; i++) {
-        const item = items[i];
-        const key = item.key;
-        const kinds = properties[key];
-        const value = kinds.init ? kinds.init() : undefined;
-        const getter = kinds.get ? kinds.get() : function () { };
-        const setter = kinds.set ? kinds.set() : function (a: any) { };
+      for (const item of items) {
+        if (item.type === 'spread') {
+          // ES6: Spread properties
+          Object.assign(result, item.valueClosure());
+          continue;
+        }
 
-        if ("set" in kinds || "get" in kinds) {
-          const descriptor = {
-            configurable: true,
-            enumerable: true,
-            get: getter,
-            set: setter,
-          };
-          Object.defineProperty(result, key, descriptor);
-        } else {
-          const property = item.property;
-          const kind = property.kind;
-          // set function.name
-          // var d = { test(){} }
-          // var d = { test: function(){} }
-          if (
-            property.key.type === "Identifier" &&
-            property.value.type === "FunctionExpression" &&
-            kind === "init" &&
-            !property.value.id
-          ) {
-            defineFunctionName(value, property.key.name);
+        const key = item.keyGetter();
+        const value = item.valueClosure();
+
+        if (item.kind === 'get' || item.kind === 'set') {
+          // Getter/Setter
+          let desc = descriptors.get(key);
+          if (!desc) {
+            desc = { configurable: true, enumerable: true };
+            descriptors.set(key, desc);
           }
-
+          desc[item.kind] = value;
+        } else {
+          // Regular property or method
+          // Set function.name for anonymous functions and methods
+          if ((item.isMethod || item.isAnonymousFunction) && typeof value === 'function') {
+            defineFunctionName(value, key);
+          }
           result[key] = value;
         }
       }
+
+      // Apply getter/setter descriptors
+      descriptors.forEach((desc, key) => {
+        Object.defineProperty(result, key, desc);
+      });
 
       return result;
     };
   }
 
-  // [1,2,3]
+  // [1,2,3, ...arr]
   protected arrayExpressionHandler(node: ESTree.ArrayExpression) {
     //fix: [,,,1,2]
-    const items: Array<BaseClosure> = node.elements.map(element =>
-      element ? this.createClosure(element) : element
-    );
+    const items: Array<{ closure: BaseClosure; isSpread: boolean } | null> = node.elements.map(element => {
+      if (!element) return null;
+      // ES6: Spread element [...arr]
+      if (element.type === 'SpreadElement') {
+        return {
+          closure: this.createClosure(element.argument),
+          isSpread: true,
+        };
+      }
+      return {
+        closure: this.createClosure(element),
+        isSpread: false,
+      };
+    });
 
     return () => {
-      const len = items.length;
-      const result = Array(len);
-      for (let i = 0; i < len; i++) {
+      const result: any[] = [];
+      for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        if (item) {
-          result[i] = item();
+        if (!item) {
+          // Preserve holes
+          result.length++;
+          continue;
+        }
+        if (item.isSpread) {
+          // ES6: Spread elements
+          const spreadValue = item.closure();
+          result.push(...spreadValue);
+        } else {
+          result.push(item.closure());
         }
       }
 
@@ -1130,12 +1272,33 @@ export class Interpreter {
     }
   }
 
-  // func()
+  // func(...args)
   protected callExpressionHandler(node: ESTree.CallExpression): BaseClosure {
     const funcGetter = this.createCallFunctionGetter(node.callee);
-    const argsGetter = node.arguments.map(arg => this.createClosure(arg));
+    // ES6: Support spread in function calls
+    const argsGetters = node.arguments.map(arg => {
+      if (arg.type === 'SpreadElement') {
+        return {
+          closure: this.createClosure(arg.argument),
+          isSpread: true,
+        };
+      }
+      return {
+        closure: this.createClosure(arg),
+        isSpread: false,
+      };
+    });
+
     return () => {
-      return funcGetter()(...argsGetter.map(arg => arg()));
+      const args: any[] = [];
+      for (const getter of argsGetters) {
+        if (getter.isSpread) {
+          args.push(...getter.closure());
+        } else {
+          args.push(getter.closure());
+        }
+      }
+      return funcGetter()(...args);
     };
   }
 
@@ -1154,7 +1317,10 @@ export class Interpreter {
     const name = node.id ? node.id.name : ""; /**anonymous*/
     const paramLength = node.params.length;
 
-    const paramsGetter = node.params.map(param => this.createParamNameGetter(param));
+    // ES6: Use createParamHandler for better ES6 support
+    const paramsHandlers = node.params.map((param, index) =>
+      this.createParamHandler(param, index)
+    );
     // set scope
     const bodyClosure = this.createClosure(node.body);
 
@@ -1188,8 +1354,9 @@ export class Interpreter {
 
         // init arguments var
         currentScope.data["arguments"] = arguments;
-        paramsGetter.forEach((getter, i) => {
-          currentScope.data[getter()] = args[i];
+        // ES6: Use param handlers for proper ES6 parameter support
+        paramsHandlers.forEach((handler) => {
+          handler(currentScope, args);
         });
 
         // init this
@@ -1237,6 +1404,412 @@ export class Interpreter {
       });
 
       return func;
+    };
+  }
+
+  // ES6: Arrow function () => {...}
+  protected arrowFunctionExpressionHandler(
+    node: ESTree.ArrowFunctionExpression & { start?: number; end?: number }
+  ): BaseClosure {
+    const self = this;
+    const source = this.source;
+    const oldDeclVars = this.collectDeclVars;
+    const oldDeclFuncs = this.collectDeclFuncs;
+    this.collectDeclVars = Object.create(null);
+    this.collectDeclFuncs = Object.create(null);
+
+    const paramLength = node.params.length;
+    const isExpression = node.expression; // true if body is expression, not block
+
+    // Handle parameters (supports destructuring and default values)
+    const paramsHandlers = node.params.map((param, index) =>
+      this.createParamHandler(param, index)
+    );
+
+    // Function body
+    const bodyClosure = this.createClosure(node.body);
+
+    const declVars = this.collectDeclVars;
+    const declFuncs = this.collectDeclFuncs;
+
+    this.collectDeclVars = oldDeclVars;
+    this.collectDeclFuncs = oldDeclFuncs;
+
+    return () => {
+      // Capture the 'this' at definition time (arrow function's core feature)
+      const capturedThis = self.getCurrentContext();
+      const runtimeScope = self.getCurrentScope();
+
+      const arrowFunc = (...args: any[]) => {
+        self.callStack.push('(arrow)');
+
+        const prevScope = self.getCurrentScope();
+        const currentScope = createScope(runtimeScope, 'ArrowFunctionScope');
+        self.setCurrentScope(currentScope);
+
+        self.addDeclarationsToScope(declVars, declFuncs, currentScope);
+
+        // Arrow functions don't have their own arguments
+        // But we provide access to outer arguments through scope chain
+
+        // Initialize parameters
+        paramsHandlers.forEach((handler) => {
+          handler(currentScope, args);
+        });
+
+        // Arrow function uses captured this (does NOT create new this)
+        const prevContext = self.getCurrentContext();
+        self.setCurrentContext(capturedThis);
+
+        const result = bodyClosure();
+
+        // Reset
+        self.setCurrentContext(prevContext);
+        self.setCurrentScope(prevScope);
+        self.callStack.pop();
+
+        // Expression body returns directly, block body needs Return unwrap
+        if (isExpression) {
+          return result;
+        }
+        if (result instanceof Return) {
+          return result.value;
+        }
+      };
+
+      Object.defineProperty(arrowFunc, 'length', {
+        value: paramLength,
+        writable: false,
+        enumerable: false,
+        configurable: true,
+      });
+
+      Object.defineProperty(arrowFunc, 'toString', {
+        value: () => source.slice(node.start, node.end),
+        writable: true,
+        configurable: true,
+        enumerable: false,
+      });
+
+      return arrowFunc;
+    };
+  }
+
+  // ES6: Parameter handler for functions (supports destructuring and defaults)
+  protected createParamHandler(
+    param: ESTree.Pattern,
+    index: number
+  ): (scope: Scope, args: any[]) => void {
+    if (param.type === 'Identifier') {
+      // Simple parameter
+      const name = param.name;
+      return (scope, args) => {
+        scope.data[name] = args[index];
+      };
+    } else if (param.type === 'AssignmentPattern') {
+      // Default parameter: (a = 1) => {}
+      const defaultValueClosure = this.createClosure(param.right);
+      const leftHandler = this.createParamHandler(param.left, index);
+      return (scope, args) => {
+        const value = args[index] === undefined ? defaultValueClosure() : args[index];
+        // For simple identifier on left
+        if (param.left.type === 'Identifier') {
+          scope.data[param.left.name] = value;
+        } else {
+          this.destructuringAssignment(param.left, value, 'let');
+        }
+      };
+    } else if (param.type === 'RestElement') {
+      // Rest parameter: (...args) => {}
+      return (scope, args) => {
+        const rest = args.slice(index);
+        if (param.argument.type === 'Identifier') {
+          scope.data[param.argument.name] = rest;
+        } else {
+          this.destructuringAssignment(param.argument, rest, 'let');
+        }
+      };
+    } else {
+      // Destructuring parameter: ({a, b}) => {}
+      return (scope, args) => {
+        this.destructuringAssignment(param, args[index], 'let');
+      };
+    }
+  }
+
+  // ES6: Template literal `Hello ${name}`
+  protected templateLiteralHandler(node: ESTree.TemplateLiteral): BaseClosure {
+    const quasis = node.quasis;
+    const expressionClosures = node.expressions.map(expr => this.createClosure(expr));
+
+    return () => {
+      let result = '';
+      for (let i = 0; i < quasis.length; i++) {
+        result += quasis[i].value.cooked || '';
+        if (i < expressionClosures.length) {
+          result += String(expressionClosures[i]());
+        }
+      }
+      return result;
+    };
+  }
+
+  // ES6: Tagged template expression tag`template`
+  protected taggedTemplateExpressionHandler(node: ESTree.TaggedTemplateExpression): BaseClosure {
+    const tagClosure = this.createClosure(node.tag);
+    const quasis = node.quasi.quasis;
+    const expressionClosures = node.quasi.expressions.map(expr => this.createClosure(expr));
+
+    return () => {
+      const tag = tagClosure();
+
+      // Build strings array with raw property
+      const strings: string[] & { raw: string[] } = quasis.map(q => q.value.cooked!) as any;
+      strings.raw = quasis.map(q => q.value.raw);
+      Object.freeze(strings);
+      Object.freeze(strings.raw);
+
+      // Get expression values
+      const values = expressionClosures.map(closure => closure());
+
+      return tag(strings, ...values);
+    };
+  }
+
+  // ES6: for...of statement
+  protected forOfStatementHandler(node: ESTree.ForOfStatement): BaseClosure {
+    let leftPattern: ESTree.Pattern;
+    let declKind: 'var' | 'let' | 'const' | 'assign' = 'assign';
+
+    if (node.left.type === 'VariableDeclaration') {
+      declKind = (node.left.kind || 'var') as 'var' | 'let' | 'const';
+      leftPattern = node.left.declarations[0].id;
+      // Handle var hoisting
+      if (declKind === 'var' && leftPattern.type === 'Identifier') {
+        this.varDeclaration(leftPattern.name);
+      }
+    } else {
+      leftPattern = node.left as ESTree.Pattern;
+    }
+
+    const rightClosure = this.createClosure(node.right);
+    const bodyClosure = this.createClosure(node.body);
+
+    return (pNode?: Node) => {
+      let labelName: string | undefined;
+      let result: any = EmptyStatementReturn;
+
+      if (pNode && pNode.type === 'LabeledStatement') {
+        labelName = pNode.label.name;
+      }
+
+      const iterable = rightClosure();
+      if (iterable == null || typeof iterable[Symbol.iterator] !== 'function') {
+        throw this.createInternalThrowError(Messages.NotIterable, typeof iterable, node);
+      }
+
+      const iterator = iterable[Symbol.iterator]();
+      const needsBlockScope = declKind === 'let' || declKind === 'const';
+
+      let iterResult = iterator.next();
+      while (!iterResult.done) {
+        const value = iterResult.value;
+
+        // Create new block scope for each iteration (for closure capture)
+        let iterScope: Scope | null = null;
+        if (needsBlockScope) {
+          iterScope = new Scope(
+            Object.create(null),
+            this.getCurrentScope(),
+            'ForOfBlockScope',
+            true
+          );
+          this.setCurrentScope(iterScope);
+        }
+
+        try {
+          // Assign to iteration variable
+          this.destructuringAssignment(leftPattern, value, declKind);
+
+          const ret = this.setValue(bodyClosure());
+
+          if (ret === EmptyStatementReturn || ret === Continue) {
+            iterResult = iterator.next();
+            continue;
+          }
+
+          if (ret === Break) break;
+
+          result = ret;
+
+          if (result instanceof ContinueLabel && result.value === labelName) {
+            result = EmptyStatementReturn;
+            iterResult = iterator.next();
+            continue;
+          }
+
+          if (result instanceof BreakLabel && result.value === labelName) {
+            result = EmptyStatementReturn;
+            break;
+          }
+
+          if (result instanceof Return || result instanceof BreakLabel || result instanceof ContinueLabel) {
+            break;
+          }
+        } finally {
+          if (iterScope) {
+            this.setCurrentScope(iterScope.parent!);
+          }
+        }
+
+        iterResult = iterator.next();
+      }
+
+      return result;
+    };
+  }
+
+  // ES6: Spread element handler (for standalone use)
+  protected spreadElementHandler(node: ESTree.SpreadElement): BaseClosure {
+    const argumentClosure = this.createClosure(node.argument);
+    return () => argumentClosure();
+  }
+
+  // ES6: Class declaration
+  protected classDeclarationHandler(node: ESTree.ClassDeclaration): BaseClosure {
+    if (node.id) {
+      const classClosure = this.classExpressionHandler(node);
+      this.funcDeclaration(node.id.name, classClosure);
+    }
+    return () => EmptyStatementReturn;
+  }
+
+  // ES6: Class expression
+  protected classExpressionHandler(
+    node: ESTree.ClassDeclaration | ESTree.ClassExpression
+  ): BaseClosure {
+    const self = this;
+    const className = node.id?.name || '';
+
+    // Handle superclass
+    const superClassClosure = node.superClass
+      ? this.createClosure(node.superClass)
+      : null;
+
+    // Process class body
+    const body = node.body.body;
+    const constructorMethod = body.find(
+      m => m.type === 'MethodDefinition' && m.kind === 'constructor'
+    ) as ESTree.MethodDefinition | undefined;
+
+    const instanceMethods: Array<{
+      key: () => string;
+      kind: 'method' | 'get' | 'set';
+      closure: BaseClosure;
+      isStatic: boolean;
+    }> = [];
+
+    for (const method of body) {
+      if (method.type !== 'MethodDefinition') continue;
+      if (method.kind === 'constructor') continue;
+
+      const keyGetter = this.getPropertyKeyGetter(method.key, method.computed);
+      instanceMethods.push({
+        key: keyGetter,
+        kind: method.kind as 'method' | 'get' | 'set',
+        closure: this.functionExpressionHandler(method.value as ESTree.FunctionExpression),
+        isStatic: method.static || false,
+      });
+    }
+
+    // Pre-compile constructor
+    const constructorClosure = constructorMethod
+      ? this.functionExpressionHandler(constructorMethod.value as ESTree.FunctionExpression)
+      : null;
+
+    return () => {
+      const SuperClass = superClassClosure ? superClassClosure() : null;
+
+      // Create class constructor function
+      let ClassConstructor: any;
+
+      if (constructorClosure) {
+        const constructorFunc = constructorClosure();
+        ClassConstructor = function (this: any, ...args: any[]) {
+          // Check if called without new
+          if (!(this instanceof ClassConstructor)) {
+            throw new TypeError("Class constructor cannot be invoked without 'new'");
+          }
+          return constructorFunc.apply(this, args);
+        };
+      } else if (SuperClass) {
+        ClassConstructor = function (this: any, ...args: any[]) {
+          if (!(this instanceof ClassConstructor)) {
+            throw new TypeError("Class constructor cannot be invoked without 'new'");
+          }
+          return SuperClass.apply(this, args);
+        };
+      } else {
+        ClassConstructor = function (this: any) {
+          if (!(this instanceof ClassConstructor)) {
+            throw new TypeError("Class constructor cannot be invoked without 'new'");
+          }
+        };
+      }
+
+      // Set up inheritance
+      if (SuperClass) {
+        ClassConstructor.prototype = Object.create(SuperClass.prototype);
+        ClassConstructor.prototype.constructor = ClassConstructor;
+        Object.setPrototypeOf(ClassConstructor, SuperClass);
+      }
+
+      // Add methods
+      for (const { key, kind, closure, isStatic } of instanceMethods) {
+        const method = closure();
+        const keyName = key();
+        const target = isStatic ? ClassConstructor : ClassConstructor.prototype;
+
+        if (kind === 'method') {
+          target[keyName] = method;
+        } else {
+          // getter or setter
+          const descriptor = Object.getOwnPropertyDescriptor(target, keyName) || {
+            configurable: true,
+            enumerable: false,
+          };
+          descriptor[kind] = method;
+          Object.defineProperty(target, keyName, descriptor);
+        }
+      }
+
+      defineFunctionName(ClassConstructor, className);
+
+      return ClassConstructor;
+    };
+  }
+
+  // ES6: Helper to get property key getter (for computed keys)
+  protected getPropertyKeyGetter(
+    key: ESTree.Expression,
+    computed: boolean
+  ): () => string {
+    if (computed) {
+      const keyClosure = this.createClosure(key);
+      return () => String(keyClosure());
+    }
+    if (key.type === 'Identifier') {
+      return () => key.name;
+    }
+    return () => String((key as ESTree.Literal).value);
+  }
+
+  // ES6: Super expression handler
+  protected superHandler(node: ESTree.Super): BaseClosure {
+    return () => {
+      // This is a placeholder - super needs special handling in method calls
+      // The actual super behavior is implemented in the class constructor and methods
+      throw this.createInternalThrowError(Messages.SuperNotAllowed, '', node);
     };
   }
 
@@ -1319,6 +1892,13 @@ export class Interpreter {
   protected identifierHandler(node: ESTree.Identifier): BaseClosure {
     return () => {
       const currentScope = this.getCurrentScope();
+
+      // ES6: TDZ (Temporal Dead Zone) check for let/const
+      const meta = currentScope.getVariableMeta(node.name);
+      if (meta && (meta.kind === 'let' || meta.kind === 'const') && !meta.initialized) {
+        throw this.createInternalThrowError(Messages.TDZReferenceError, node.name, node);
+      }
+
       const data = this.getScopeDataFromName(node.name, currentScope);
 
       this.assertVariable(data, node.name, node);
@@ -1337,6 +1917,16 @@ export class Interpreter {
 
   // a=1 a+=2
   protected assignmentExpressionHandler(node: ESTree.AssignmentExpression): BaseClosure {
+    // ES6: Handle destructuring assignment
+    if (node.left.type === 'ArrayPattern' || node.left.type === 'ObjectPattern') {
+      const rightValueGetter = this.createClosure(node.right);
+      return () => {
+        const value = rightValueGetter();
+        this.destructuringAssignment(node.left as ESTree.Pattern, value, 'assign');
+        return value;
+      };
+    }
+
     // var s = function(){}
     // s.name === s
     if (
@@ -1358,6 +1948,15 @@ export class Interpreter {
       const data = dataGetter();
       const name = nameGetter();
       const rightValue = rightValueGetter();
+
+      // ES6: Check const reassignment for Identifier
+      if (node.left.type === 'Identifier') {
+        const currentScope = this.getCurrentScope();
+        const scope = this.getScopeFromName(name, currentScope);
+        if (!scope.canAssign(name)) {
+          throw this.createInternalThrowError(Messages.ConstReassignment, name, node);
+        }
+      }
 
       if (node.operator !== "=") {
         // if a is undefined
@@ -1429,37 +2028,85 @@ export class Interpreter {
 
   // var i;
   // var i=1;
+  // let i=1;
+  // const i=1;
   protected variableDeclarationHandler(node: ESTree.VariableDeclaration): BaseClosure {
-    let assignmentsClosure: BaseClosure;
-    const assignments: Array<ESTree.AssignmentExpression> = [];
-    for (let i = 0; i < node.declarations.length; i++) {
-      const decl = node.declarations[i];
-      this.varDeclaration(this.getVariableName(decl.id));
-      if (decl.init) {
-        assignments.push({
-          type: "AssignmentExpression",
-          operator: "=",
-          left: decl.id,
-          right: decl.init,
+    const kind = node.kind || 'var';
+
+    // For var declarations, use existing hoisting logic
+    if (kind === 'var') {
+      let assignmentsClosure: BaseClosure;
+      const assignments: Array<ESTree.AssignmentExpression> = [];
+      for (let i = 0; i < node.declarations.length; i++) {
+        const decl = node.declarations[i];
+        this.varDeclaration(this.getVariableName(decl.id as ESTree.Identifier));
+        if (decl.init) {
+          assignments.push({
+            type: "AssignmentExpression",
+            operator: "=",
+            left: decl.id,
+            right: decl.init,
+          });
+        }
+      }
+
+      if (assignments.length) {
+        assignmentsClosure = this.createClosure({
+          type: "BlockStatement",
+          body: assignments as unknown as ESTree.Statement[],
         });
       }
+
+      return () => {
+        if (assignmentsClosure) {
+          const oldValue = this.isVarDeclMode;
+          this.isVarDeclMode = true;
+          assignmentsClosure();
+          this.isVarDeclMode = oldValue;
+        }
+
+        return EmptyStatementReturn;
+      };
     }
 
-    if (assignments.length) {
-      assignmentsClosure = this.createClosure({
-        type: "BlockStatement",
-        body: assignments as unknown as ESTree.Statement[],
+    // For let/const declarations (ES6+)
+    const declarations: Array<{
+      pattern: ESTree.Pattern;
+      initClosure: BaseClosure | null;
+    }> = [];
+
+    for (let i = 0; i < node.declarations.length; i++) {
+      const decl = node.declarations[i];
+      // const must have initializer
+      if (kind === 'const' && !decl.init) {
+        throw this.createInternalThrowError(Messages.ConstWithoutInitializer, '', node);
+      }
+      declarations.push({
+        pattern: decl.id,
+        initClosure: decl.init ? this.createClosure(decl.init) : null,
       });
     }
 
     return () => {
-      if (assignmentsClosure) {
-        const oldValue = this.isVarDeclMode;
-        this.isVarDeclMode = true;
-        assignmentsClosure();
-        this.isVarDeclMode = oldValue;
+      const currentScope = this.getCurrentScope();
+      for (const { pattern, initClosure } of declarations) {
+        const value = initClosure ? initClosure() : undefined;
+        // Handle simple identifier pattern
+        if (pattern.type === 'Identifier') {
+          const name = pattern.name;
+          // Check for redeclaration in same scope
+          // Note: TDZ pre-declaration sets initialized: false, so we check if already initialized
+          const existingMeta = currentScope.varMeta.get(name);
+          if (existingMeta && existingMeta.initialized) {
+            throw this.createInternalThrowError(Messages.VariableRedeclaration, name, node);
+          }
+          currentScope.data[name] = value;
+          currentScope.varMeta.set(name, { kind: kind as 'let' | 'const', initialized: true });
+        } else {
+          // Handle destructuring patterns (will be implemented in phase 3)
+          this.destructuringAssignment(pattern, value, kind as 'let' | 'const');
+        }
       }
-
       return EmptyStatementReturn;
     };
   }
@@ -1472,36 +2119,71 @@ export class Interpreter {
 
   // {...}
   protected programHandler(node: ESTree.Program | ESTree.BlockStatement): BaseClosure {
-    // const currentScope = this.getCurrentScope();
+    const isBlock = node.type === 'BlockStatement';
+
+    // ES6: Collect block-scoped declarations (let/const)
+    const blockDeclarations: string[] = [];
+    if (isBlock) {
+      for (const stmt of node.body) {
+        if (stmt.type === 'VariableDeclaration' && (stmt.kind === 'let' || stmt.kind === 'const')) {
+          for (const decl of stmt.declarations) {
+            if (decl.id.type === 'Identifier') {
+              blockDeclarations.push(decl.id.name);
+            }
+            // For destructuring patterns, will be handled during execution
+          }
+        }
+      }
+    }
+
     const stmtClosures: Array<BaseClosure> = (node.body as Node[]).map((stmt: Node) => {
-      // if (stmt.type === "EmptyStatement") return null;
       return this.createClosure(stmt);
     });
 
     return () => {
       let result: any = EmptyStatementReturn;
-      for (let i = 0; i < stmtClosures.length; i++) {
-        const stmtClosure = stmtClosures[i];
+      let blockScope: Scope | null = null;
 
-        // save last value
-        const ret = this.setValue(stmtClosure());
+      // ES6: Create block scope for BlockStatement with let/const declarations
+      if (isBlock && blockDeclarations.length > 0) {
+        const currentScope = this.getCurrentScope();
+        blockScope = new Scope(Object.create(null), currentScope, 'BlockScope', true);
+        this.setCurrentScope(blockScope);
 
-        // if (!stmtClosure) continue;
-        // EmptyStatement
-        if (ret === EmptyStatementReturn) continue;
+        // Pre-declare variables for TDZ (uninitialized)
+        for (const name of blockDeclarations) {
+          blockScope.varMeta.set(name, { kind: 'let', initialized: false });
+        }
+      }
 
-        result = ret;
+      try {
+        for (let i = 0; i < stmtClosures.length; i++) {
+          const stmtClosure = stmtClosures[i];
 
-        // BlockStatement: break label;  continue label; for(){ break ... }
-        // ReturnStatement: return xx;
-        if (
-          result instanceof Return ||
-          result instanceof BreakLabel ||
-          result instanceof ContinueLabel ||
-          result === Break ||
-          result === Continue
-        ) {
-          break;
+          // save last value
+          const ret = this.setValue(stmtClosure());
+
+          // EmptyStatement
+          if (ret === EmptyStatementReturn) continue;
+
+          result = ret;
+
+          // BlockStatement: break label;  continue label; for(){ break ... }
+          // ReturnStatement: return xx;
+          if (
+            result instanceof Return ||
+            result instanceof BreakLabel ||
+            result instanceof ContinueLabel ||
+            result === Break ||
+            result === Continue
+          ) {
+            break;
+          }
+        }
+      } finally {
+        // Restore scope
+        if (blockScope) {
+          this.setCurrentScope(blockScope.parent!);
         }
       }
 
@@ -1542,6 +2224,7 @@ export class Interpreter {
     return this.ifStatementHandler(node);
   }
   // for(var i = 0; i < 10; i++) {...}
+  // for(let i = 0; i < 10; i++) {...}  - ES6: creates new binding per iteration
   protected forStatementHandler(
     node: ESTree.ForStatement | ESTree.WhileStatement | ESTree.DoWhileStatement
   ): BaseClosure {
@@ -1550,9 +2233,24 @@ export class Interpreter {
     let updateClosure = noop;
     const bodyClosure = this.createClosure(node.body);
 
+    // ES6: Check if we have let/const in for init
+    let letConstVars: string[] = [];
+    let isLetConst = false;
+
     if (node.type === "ForStatement") {
       initClosure = node.init ? this.createClosure(node.init) : initClosure;
       updateClosure = node.update ? this.createClosure(node.update) : noop;
+
+      // Check for let/const in init
+      if (node.init && node.init.type === 'VariableDeclaration' &&
+          (node.init.kind === 'let' || node.init.kind === 'const')) {
+        isLetConst = true;
+        for (const decl of node.init.declarations) {
+          if (decl.id.type === 'Identifier') {
+            letConstVars.push(decl.id.name);
+          }
+        }
+      }
     }
 
     return pNode => {
@@ -1564,32 +2262,74 @@ export class Interpreter {
         labelName = pNode.label.name;
       }
 
-      for (initClosure(); shouldInitExec || testClosure(); updateClosure()) {
-        shouldInitExec = false;
+      // ES6: For let/const, create a scope for the entire for statement
+      let forScope: Scope | null = null;
+      if (isLetConst) {
+        forScope = new Scope(Object.create(null), this.getCurrentScope(), 'ForLetScope', true);
+        this.setCurrentScope(forScope);
+      }
 
-        // save last value
-        const ret = this.setValue(bodyClosure());
+      try {
+        initClosure();
 
-        // notice: never return Break or Continue!
-        if (ret === EmptyStatementReturn || ret === Continue) continue;
-        if (ret === Break) {
-          break;
+        while (shouldInitExec || testClosure()) {
+          shouldInitExec = false;
+
+          // ES6: For let/const, create a new scope for each iteration
+          // and copy current values of loop variables
+          let iterScope: Scope | null = null;
+          if (isLetConst && forScope) {
+            iterScope = new Scope(Object.create(null), forScope, 'ForIterScope', true);
+            // Copy current values of let/const variables to iteration scope
+            for (const varName of letConstVars) {
+              iterScope.data[varName] = forScope.data[varName];
+              iterScope.varMeta.set(varName, { kind: 'let', initialized: true });
+            }
+            this.setCurrentScope(iterScope);
+          }
+
+          // save last value
+          const ret = this.setValue(bodyClosure());
+
+          // ES6: Copy back the values to the for scope for the next iteration
+          if (isLetConst && iterScope && forScope) {
+            for (const varName of letConstVars) {
+              forScope.data[varName] = iterScope.data[varName];
+            }
+            this.setCurrentScope(forScope);
+          }
+
+          // notice: never return Break or Continue!
+          if (ret === EmptyStatementReturn || ret === Continue) {
+            updateClosure();
+            continue;
+          }
+          if (ret === Break) {
+            break;
+          }
+
+          result = ret;
+
+          // stop continue label
+          if (result instanceof ContinueLabel && result.value === labelName) {
+            result = EmptyStatementReturn;
+            updateClosure();
+            continue;
+          }
+
+          if (
+            result instanceof Return ||
+            result instanceof BreakLabel ||
+            result instanceof ContinueLabel
+          ) {
+            break;
+          }
+
+          updateClosure();
         }
-
-        result = ret;
-
-        // stop continue label
-        if (result instanceof ContinueLabel && result.value === labelName) {
-          result = EmptyStatementReturn;
-          continue;
-        }
-
-        if (
-          result instanceof Return ||
-          result instanceof BreakLabel ||
-          result instanceof ContinueLabel
-        ) {
-          break;
+      } finally {
+        if (forScope) {
+          this.setCurrentScope(forScope.parent!);
         }
       }
 
@@ -1939,10 +2679,25 @@ export class Interpreter {
     };
   }
 
-  // get es3/5 param name
+  // get es3/5 param name (for ES6 patterns, use createParamHandler instead)
   protected createParamNameGetter(node: ESTree.Pattern): ReturnStringClosure {
     if (node.type === "Identifier") {
       return () => node.name;
+    } else if (node.type === "RestElement") {
+      // ES6: Rest parameter (...args)
+      if (node.argument.type === "Identifier") {
+        return () => (node.argument as ESTree.Identifier).name;
+      }
+      throw this.createInternalThrowError(Messages.ParamTypeSyntaxError, node.type, node);
+    } else if (node.type === "AssignmentPattern") {
+      // ES6: Default parameter (a = 1)
+      if (node.left.type === "Identifier") {
+        return () => (node.left as ESTree.Identifier).name;
+      }
+      throw this.createInternalThrowError(Messages.ParamTypeSyntaxError, node.type, node);
+    } else if (node.type === "ObjectPattern" || node.type === "ArrayPattern") {
+      // ES6: Destructuring parameter - return a placeholder, actual handling in function body
+      return () => `__destructure_${Math.random().toString(36).slice(2)}`;
     } else {
       throw this.createInternalThrowError(Messages.ParamTypeSyntaxError, node.type, node);
     }
@@ -2004,6 +2759,156 @@ export class Interpreter {
   protected funcDeclaration(name: string, func: () => any): void {
     const context = this.collectDeclFuncs;
     context[name] = func;
+  }
+
+  // ES6: Destructuring assignment handler
+  protected destructuringAssignment(
+    pattern: ESTree.Pattern,
+    value: any,
+    kind: 'var' | 'let' | 'const' | 'assign' = 'assign'
+  ): void {
+    const currentScope = this.getCurrentScope();
+
+    switch (pattern.type) {
+      case 'Identifier':
+        const name = pattern.name;
+        if (kind === 'assign') {
+          // Regular assignment
+          const scope = this.getScopeFromName(name, currentScope);
+          // Check const reassignment
+          if (!scope.canAssign(name)) {
+            throw this.createInternalThrowError(Messages.ConstReassignment, name, pattern);
+          }
+          scope.data[name] = value;
+        } else {
+          // Declaration (let/const/var)
+          if (kind === 'var') {
+            const targetScope = currentScope.findFunctionScope();
+            targetScope.data[name] = value;
+            targetScope.varMeta.set(name, { kind, initialized: true });
+          } else {
+            // Check for redeclaration - but allow TDZ pre-declaration (initialized: false)
+            const existingMeta = currentScope.varMeta.get(name);
+            if (existingMeta && existingMeta.initialized) {
+              throw this.createInternalThrowError(Messages.VariableRedeclaration, name, pattern);
+            }
+            currentScope.data[name] = value;
+            currentScope.varMeta.set(name, { kind, initialized: true });
+          }
+        }
+        break;
+
+      case 'ArrayPattern':
+        this.destructureArray(pattern, value, kind);
+        break;
+
+      case 'ObjectPattern':
+        this.destructureObject(pattern, value, kind);
+        break;
+
+      case 'AssignmentPattern':
+        // Default value: const { a = 1 } = obj
+        const actualValue = value === undefined
+          ? this.createClosure(pattern.right)()
+          : value;
+        this.destructuringAssignment(pattern.left, actualValue, kind);
+        break;
+
+      case 'RestElement':
+        this.destructuringAssignment(pattern.argument, value, kind);
+        break;
+
+      case 'MemberExpression':
+        // Destructure to object property: [a.b] = [1]
+        const obj = this.createClosure(pattern.object)();
+        const key = pattern.computed
+          ? this.createClosure(pattern.property)()
+          : (pattern.property as ESTree.Identifier).name;
+        obj[key] = value;
+        break;
+
+      default:
+        throw this.createInternalThrowError(
+          Messages.AssignmentTypeSyntaxError,
+          (pattern as any).type,
+          pattern as any
+        );
+    }
+  }
+
+  // ES6: Array destructuring
+  protected destructureArray(
+    pattern: ESTree.ArrayPattern,
+    value: any,
+    kind: 'var' | 'let' | 'const' | 'assign'
+  ): void {
+    if (value == null) {
+      throw this.createInternalThrowError(Messages.NotIterable, String(value), pattern);
+    }
+
+    const iterator = value[Symbol.iterator] ? value[Symbol.iterator]() : null;
+    if (!iterator) {
+      throw this.createInternalThrowError(Messages.NotIterable, typeof value, pattern);
+    }
+
+    for (let i = 0; i < pattern.elements.length; i++) {
+      const element = pattern.elements[i];
+      if (!element) {
+        // Skip holes: [,a] = [1,2]
+        iterator.next();
+        continue;
+      }
+
+      if (element.type === 'RestElement') {
+        // Rest element: [a, ...rest] = [1,2,3]
+        const rest: any[] = [];
+        let next = iterator.next();
+        while (!next.done) {
+          rest.push(next.value);
+          next = iterator.next();
+        }
+        this.destructuringAssignment(element.argument, rest, kind);
+      } else {
+        const { value: itemValue, done } = iterator.next();
+        this.destructuringAssignment(element, done ? undefined : itemValue, kind);
+      }
+    }
+  }
+
+  // ES6: Object destructuring
+  protected destructureObject(
+    pattern: ESTree.ObjectPattern,
+    value: any,
+    kind: 'var' | 'let' | 'const' | 'assign'
+  ): void {
+    if (value == null) {
+      throw this.createInternalThrowError(Messages.NotIterable, String(value), pattern);
+    }
+
+    const assignedKeys = new Set<string>();
+
+    for (const prop of pattern.properties as Array<ESTree.AssignmentProperty | ESTree.RestElement>) {
+      if (prop.type === 'RestElement') {
+        // Rest property: const { a, ...rest } = obj
+        const rest: any = {};
+        for (const key in value) {
+          if (!assignedKeys.has(key)) {
+            rest[key] = value[key];
+          }
+        }
+        this.destructuringAssignment(prop.argument, rest, kind);
+      } else {
+        // Regular property
+        const property = prop;
+        const key = property.computed
+          ? this.createClosure(property.key)()
+          : (property.key as ESTree.Identifier).name || (property.key as ESTree.Literal).value;
+
+        assignedKeys.add(String(key));
+        const propValue = value[key];
+        this.destructuringAssignment(property.value as ESTree.Pattern, propValue, kind);
+      }
+    }
   }
 
   protected addDeclarationsToScope(

@@ -44,4 +44,13 @@ export const Messages: Messages = {
 	FunctionUndefinedReferenceError: [2001, "%0 is not a function", ThrowReferenceError],
 	VariableUndefinedReferenceError: [2002, "%0 is not defined", ThrowReferenceError],
 	IsNotConstructor: [2003, "%0 is not a constructor", ThrowTypeError],
+	// ES6 related errors
+	ConstWithoutInitializer: [1011, "Missing initializer in const declaration", InterruptThrowSyntaxError],
+	ConstReassignment: [2004, "Assignment to constant variable '%0'", ThrowTypeError],
+	VariableRedeclaration: [1012, "Identifier '%0' has already been declared", InterruptThrowSyntaxError],
+	TDZReferenceError: [2005, "Cannot access '%0' before initialization", ThrowReferenceError],
+	NotIterable: [2006, "%0 is not iterable", ThrowTypeError],
+	SuperNotAllowed: [1013, "'super' keyword is unexpected here", InterruptThrowSyntaxError],
+	ClassConstructorNonCallable: [2007, "Class constructor cannot be invoked without 'new'", ThrowTypeError],
+	DuplicateConstructor: [1014, "A class may only have one constructor", InterruptThrowSyntaxError],
 };

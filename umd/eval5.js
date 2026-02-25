@@ -784,10 +784,10 @@
 	// to its body instead of creating a new node.
 
 	pp$1.parseTopLevel = function(node) {
-	  var exports = {};
+	  var exports$1 = {};
 	  if (!node.body) { node.body = []; }
 	  while (this.type !== types.eof) {
-	    var stmt = this.parseStatement(null, true, exports);
+	    var stmt = this.parseStatement(null, true, exports$1);
 	    node.body.push(stmt);
 	  }
 	  if (this.inModule)
@@ -849,7 +849,7 @@
 	// `if (foo) /blah/.exec(foo)`, where looking at the previous token
 	// does not help.
 
-	pp$1.parseStatement = function(context, topLevel, exports) {
+	pp$1.parseStatement = function(context, topLevel, exports$1) {
 	  var starttype = this.type, node = this.startNode(), kind;
 
 	  if (this.isLet(context)) {
@@ -904,7 +904,7 @@
 	      if (!this.inModule)
 	        { this.raise(this.start, "'import' and 'export' may appear only with 'sourceType: module'"); }
 	    }
-	    return starttype === types._import ? this.parseImport(node) : this.parseExport(node, exports)
+	    return starttype === types._import ? this.parseImport(node) : this.parseExport(node, exports$1)
 
 	    // If the statement does not start with a statement keyword or a
 	    // brace, it's an ExpressionStatement or LabeledStatement. We
@@ -1453,14 +1453,14 @@
 
 	// Parses module export declaration.
 
-	pp$1.parseExport = function(node, exports) {
+	pp$1.parseExport = function(node, exports$1) {
 	  this.next();
 	  // export * from '...'
 	  if (this.eat(types.star)) {
 	    if (this.options.ecmaVersion >= 11) {
 	      if (this.eatContextual("as")) {
 	        node.exported = this.parseIdent(true);
-	        this.checkExport(exports, node.exported.name, this.lastTokStart);
+	        this.checkExport(exports$1, node.exported.name, this.lastTokStart);
 	      } else {
 	        node.exported = null;
 	      }
@@ -1472,7 +1472,7 @@
 	    return this.finishNode(node, "ExportAllDeclaration")
 	  }
 	  if (this.eat(types._default)) { // export default ...
-	    this.checkExport(exports, "default", this.lastTokStart);
+	    this.checkExport(exports$1, "default", this.lastTokStart);
 	    var isAsync;
 	    if (this.type === types._function || (isAsync = this.isAsyncFunction())) {
 	      var fNode = this.startNode();
@@ -1492,14 +1492,14 @@
 	  if (this.shouldParseExportStatement()) {
 	    node.declaration = this.parseStatement(null);
 	    if (node.declaration.type === "VariableDeclaration")
-	      { this.checkVariableExport(exports, node.declaration.declarations); }
+	      { this.checkVariableExport(exports$1, node.declaration.declarations); }
 	    else
-	      { this.checkExport(exports, node.declaration.id.name, node.declaration.id.start); }
+	      { this.checkExport(exports$1, node.declaration.id.name, node.declaration.id.start); }
 	    node.specifiers = [];
 	    node.source = null;
 	  } else { // export { x, y as z } [from '...']
 	    node.declaration = null;
-	    node.specifiers = this.parseExportSpecifiers(exports);
+	    node.specifiers = this.parseExportSpecifiers(exports$1);
 	    if (this.eatContextual("from")) {
 	      if (this.type !== types.string) { this.unexpected(); }
 	      node.source = this.parseExprAtom();
@@ -1520,47 +1520,47 @@
 	  return this.finishNode(node, "ExportNamedDeclaration")
 	};
 
-	pp$1.checkExport = function(exports, name, pos) {
-	  if (!exports) { return }
-	  if (has(exports, name))
+	pp$1.checkExport = function(exports$1, name, pos) {
+	  if (!exports$1) { return }
+	  if (has(exports$1, name))
 	    { this.raiseRecoverable(pos, "Duplicate export '" + name + "'"); }
-	  exports[name] = true;
+	  exports$1[name] = true;
 	};
 
-	pp$1.checkPatternExport = function(exports, pat) {
+	pp$1.checkPatternExport = function(exports$1, pat) {
 	  var type = pat.type;
 	  if (type === "Identifier")
-	    { this.checkExport(exports, pat.name, pat.start); }
+	    { this.checkExport(exports$1, pat.name, pat.start); }
 	  else if (type === "ObjectPattern")
 	    { for (var i = 0, list = pat.properties; i < list.length; i += 1)
 	      {
 	        var prop = list[i];
 
-	        this.checkPatternExport(exports, prop);
+	        this.checkPatternExport(exports$1, prop);
 	      } }
 	  else if (type === "ArrayPattern")
 	    { for (var i$1 = 0, list$1 = pat.elements; i$1 < list$1.length; i$1 += 1) {
 	      var elt = list$1[i$1];
 
-	        if (elt) { this.checkPatternExport(exports, elt); }
+	        if (elt) { this.checkPatternExport(exports$1, elt); }
 	    } }
 	  else if (type === "Property")
-	    { this.checkPatternExport(exports, pat.value); }
+	    { this.checkPatternExport(exports$1, pat.value); }
 	  else if (type === "AssignmentPattern")
-	    { this.checkPatternExport(exports, pat.left); }
+	    { this.checkPatternExport(exports$1, pat.left); }
 	  else if (type === "RestElement")
-	    { this.checkPatternExport(exports, pat.argument); }
+	    { this.checkPatternExport(exports$1, pat.argument); }
 	  else if (type === "ParenthesizedExpression")
-	    { this.checkPatternExport(exports, pat.expression); }
+	    { this.checkPatternExport(exports$1, pat.expression); }
 	};
 
-	pp$1.checkVariableExport = function(exports, decls) {
-	  if (!exports) { return }
+	pp$1.checkVariableExport = function(exports$1, decls) {
+	  if (!exports$1) { return }
 	  for (var i = 0, list = decls; i < list.length; i += 1)
 	    {
 	    var decl = list[i];
 
-	    this.checkPatternExport(exports, decl.id);
+	    this.checkPatternExport(exports$1, decl.id);
 	  }
 	};
 
@@ -1575,7 +1575,7 @@
 
 	// Parses a comma-separated list of module exports.
 
-	pp$1.parseExportSpecifiers = function(exports) {
+	pp$1.parseExportSpecifiers = function(exports$1) {
 	  var nodes = [], first = true;
 	  // export { x, y as z } [from '...']
 	  this.expect(types.braceL);
@@ -1588,7 +1588,7 @@
 	    var node = this.startNode();
 	    node.local = this.parseIdent(true);
 	    node.exported = this.eatContextual("as") ? this.parseIdent(true) : node.local;
-	    this.checkExport(exports, node.exported.name, node.exported.start);
+	    this.checkExport(exports$1, node.exported.name, node.exported.start);
 	    nodes.push(this.finishNode(node, "ExportSpecifier"));
 	  }
 	  return nodes
@@ -5324,6 +5324,15 @@
 	    FunctionUndefinedReferenceError: [2001, "%0 is not a function", ThrowReferenceError],
 	    VariableUndefinedReferenceError: [2002, "%0 is not defined", ThrowReferenceError],
 	    IsNotConstructor: [2003, "%0 is not a constructor", ThrowTypeError],
+	    // ES6 related errors
+	    ConstWithoutInitializer: [1011, "Missing initializer in const declaration", InterruptThrowSyntaxError],
+	    ConstReassignment: [2004, "Assignment to constant variable '%0'", ThrowTypeError],
+	    VariableRedeclaration: [1012, "Identifier '%0' has already been declared", InterruptThrowSyntaxError],
+	    TDZReferenceError: [2005, "Cannot access '%0' before initialization", ThrowReferenceError],
+	    NotIterable: [2006, "%0 is not iterable", ThrowTypeError],
+	    SuperNotAllowed: [1013, "'super' keyword is unexpected here", InterruptThrowSyntaxError],
+	    ClassConstructorNonCallable: [2007, "Class constructor cannot be invoked without 'new'", ThrowTypeError],
+	    DuplicateConstructor: [1014, "A class may only have one constructor", InterruptThrowSyntaxError],
 	};
 
 	var __assign = (commonjsGlobal && commonjsGlobal.__assign) || function () {
@@ -5467,32 +5476,82 @@
 	    }
 	    return ContinueLabel;
 	}());
-	/**
-	 * scope chain
-	 *
-	 * superScope
-	 *     ↓
-	 * rootScope
-	 *     ↓
-	 * globalScope
-	 *     ↓
-	 * functionScope
-	 *
-	 */
 	var Scope = /** @class */ (function () {
-	    function Scope(data, parent, name) {
+	    function Scope(data, parent, name, isBlockScope) {
 	        if (parent === void 0) { parent = null; }
+	        if (isBlockScope === void 0) { isBlockScope = false; }
 	        this.name = name;
 	        this.parent = parent;
 	        this.data = data;
 	        this.labelStack = [];
+	        this.varMeta = new Map();
+	        this.isBlockScope = isBlockScope;
 	    }
+	    // Find the function scope for var hoisting
+	    Scope.prototype.findFunctionScope = function () {
+	        var scope = this;
+	        while (scope.isBlockScope && scope.parent) {
+	            scope = scope.parent;
+	        }
+	        return scope;
+	    };
+	    // Declare a variable with kind tracking
+	    Scope.prototype.declareVariable = function (name, kind, value) {
+	        if (kind === 'var') {
+	            // var hoists to function scope
+	            var targetScope = this.findFunctionScope();
+	            if (!(name in targetScope.data)) {
+	                targetScope.data[name] = value;
+	            }
+	            targetScope.varMeta.set(name, { kind: kind, initialized: value !== undefined });
+	        }
+	        else {
+	            // let/const stay in block scope
+	            if (this.varMeta.has(name)) {
+	                throw new SyntaxError("Identifier '".concat(name, "' has already been declared"));
+	            }
+	            this.data[name] = value;
+	            this.varMeta.set(name, { kind: kind, initialized: value !== undefined });
+	        }
+	    };
+	    // Check if variable can be assigned (const check)
+	    Scope.prototype.canAssign = function (name) {
+	        var meta = this.getVariableMeta(name);
+	        if (meta && meta.kind === 'const' && meta.initialized) {
+	            return false;
+	        }
+	        return true;
+	    };
+	    // Get variable metadata from scope chain
+	    Scope.prototype.getVariableMeta = function (name) {
+	        var scope = this;
+	        while (scope) {
+	            if (scope.varMeta.has(name)) {
+	                return scope.varMeta.get(name);
+	            }
+	            scope = scope.parent;
+	        }
+	        return undefined;
+	    };
+	    // Mark variable as initialized (for TDZ)
+	    Scope.prototype.markInitialized = function (name) {
+	        var scope = this;
+	        while (scope) {
+	            if (scope.varMeta.has(name)) {
+	                var meta = scope.varMeta.get(name);
+	                meta.initialized = true;
+	                return;
+	            }
+	            scope = scope.parent;
+	        }
+	    };
 	    return Scope;
 	}());
 	function noop() { }
-	function createScope(parent, name) {
+	function createScope(parent, name, isBlockScope) {
 	    if (parent === void 0) { parent = null; }
-	    return new Scope(Object.create(null), parent, name);
+	    if (isBlockScope === void 0) { isBlockScope = false; }
+	    return new Scope(Object.create(null), parent, name, isBlockScope);
 	}
 	function createRootContext(data) {
 	    return Object.create(data);
@@ -5558,7 +5617,7 @@
 	if (typeof Reflect !== "undefined") {
 	    BuildInObjects.Reflect = Reflect;
 	}
-	var Interpreter = main.Interpreter = /** @class */ (function () {
+	var Interpreter = /** @class */ (function () {
 	    function Interpreter(context, options) {
 	        if (context === void 0) { context = Interpreter.global; }
 	        if (options === void 0) { options = {}; }
@@ -5851,6 +5910,31 @@
 	            case "DebuggerStatement":
 	                closure = this.debuggerStatementHandler(node);
 	                break;
+	            // ES6 node types
+	            case "ArrowFunctionExpression":
+	                closure = this.arrowFunctionExpressionHandler(node);
+	                break;
+	            case "TemplateLiteral":
+	                closure = this.templateLiteralHandler(node);
+	                break;
+	            case "TaggedTemplateExpression":
+	                closure = this.taggedTemplateExpressionHandler(node);
+	                break;
+	            case "ForOfStatement":
+	                closure = this.forOfStatementHandler(node);
+	                break;
+	            case "SpreadElement":
+	                closure = this.spreadElementHandler(node);
+	                break;
+	            case "ClassDeclaration":
+	                closure = this.classDeclarationHandler(node);
+	                break;
+	            case "ClassExpression":
+	                closure = this.classExpressionHandler(node);
+	                break;
+	            case "Super":
+	                closure = this.superHandler(node);
+	                break;
 	            default:
 	                throw this.createInternalThrowError(messages_1.Messages.NodeTypeSyntaxError, node.type, node);
 	        }
@@ -6017,88 +6101,130 @@
 	            }
 	        };
 	    };
-	    // var o = {a: 1, b: 's', get name(){}, set name(){}  ...}
+	    // var o = {a: 1, b: 's', get name(){}, set name(){}, ...obj, [computed]: val, method() {}  ...}
 	    Interpreter.prototype.objectExpressionHandler = function (node) {
-	        var _this = this;
 	        var items = [];
-	        function getKey(keyNode) {
-	            if (keyNode.type === "Identifier") {
-	                // var o = {a:1}
-	                return keyNode.name;
+	        var _loop_1 = function (prop) {
+	            // ES6: Spread element {...obj}
+	            if (prop.type === 'SpreadElement') {
+	                items.push({
+	                    type: 'spread',
+	                    valueClosure: this_1.createClosure(prop.argument),
+	                });
+	                return "continue";
 	            }
-	            else if (keyNode.type === "Literal") {
-	                // var o = {"a":1}
-	                return keyNode.value;
+	            var property = prop;
+	            // ES6: Computed property name {[expr]: value}
+	            var keyGetter = void 0;
+	            if (property.computed) {
+	                var keyClosure_1 = this_1.createClosure(property.key);
+	                keyGetter = function () { return String(keyClosure_1()); };
+	            }
+	            else if (property.key.type === 'Identifier') {
+	                var keyName_1 = property.key.name;
+	                keyGetter = function () { return keyName_1; };
 	            }
 	            else {
-	                return this.throwError(messages_1.Messages.ObjectStructureSyntaxError, keyNode.type, keyNode);
+	                var keyValue_1 = String(property.key.value);
+	                keyGetter = function () { return keyValue_1; };
 	            }
-	        }
-	        // collect value, getter, and/or setter.
-	        var properties = Object.create(null);
-	        node.properties.forEach(function (property) {
-	            var kind = property.kind;
-	            var key = getKey(property.key);
-	            if (!properties[key] || kind === "init") {
-	                properties[key] = {};
+	            // ES6: Shorthand property {x} === {x: x}
+	            var valueClosure = void 0;
+	            if (property.shorthand) {
+	                valueClosure = this_1.identifierHandler(property.key);
 	            }
-	            properties[key][kind] = _this.createClosure(property.value);
+	            else {
+	                valueClosure = this_1.createClosure(property.value);
+	            }
+	            // Check if this is an anonymous function expression (for function.name setting)
+	            var isAnonymousFunction = property.value.type === 'FunctionExpression' &&
+	                !property.value.id;
 	            items.push({
-	                key: key,
-	                property: property,
+	                type: 'property',
+	                keyGetter: keyGetter,
+	                kind: property.kind,
+	                valueClosure: valueClosure,
+	                isMethod: property.method || false,
+	                isAnonymousFunction: isAnonymousFunction,
 	            });
-	        });
+	        };
+	        var this_1 = this;
+	        for (var _i = 0, _a = node.properties; _i < _a.length; _i++) {
+	            var prop = _a[_i];
+	            _loop_1(prop);
+	        }
 	        return function () {
 	            var result = {};
-	            var len = items.length;
-	            for (var i = 0; i < len; i++) {
-	                var item = items[i];
-	                var key = item.key;
-	                var kinds = properties[key];
-	                var value = kinds.init ? kinds.init() : undefined;
-	                var getter = kinds.get ? kinds.get() : function () { };
-	                var setter = kinds.set ? kinds.set() : function (a) { };
-	                if ("set" in kinds || "get" in kinds) {
-	                    var descriptor = {
-	                        configurable: true,
-	                        enumerable: true,
-	                        get: getter,
-	                        set: setter,
-	                    };
-	                    Object.defineProperty(result, key, descriptor);
+	            var descriptors = new Map();
+	            for (var _i = 0, items_1 = items; _i < items_1.length; _i++) {
+	                var item = items_1[_i];
+	                if (item.type === 'spread') {
+	                    // ES6: Spread properties
+	                    Object.assign(result, item.valueClosure());
+	                    continue;
+	                }
+	                var key = item.keyGetter();
+	                var value = item.valueClosure();
+	                if (item.kind === 'get' || item.kind === 'set') {
+	                    // Getter/Setter
+	                    var desc = descriptors.get(key);
+	                    if (!desc) {
+	                        desc = { configurable: true, enumerable: true };
+	                        descriptors.set(key, desc);
+	                    }
+	                    desc[item.kind] = value;
 	                }
 	                else {
-	                    var property = item.property;
-	                    var kind = property.kind;
-	                    // set function.name
-	                    // var d = { test(){} }
-	                    // var d = { test: function(){} }
-	                    if (property.key.type === "Identifier" &&
-	                        property.value.type === "FunctionExpression" &&
-	                        kind === "init" &&
-	                        !property.value.id) {
-	                        defineFunctionName(value, property.key.name);
+	                    // Regular property or method
+	                    // Set function.name for anonymous functions and methods
+	                    if ((item.isMethod || item.isAnonymousFunction) && typeof value === 'function') {
+	                        defineFunctionName(value, key);
 	                    }
 	                    result[key] = value;
 	                }
 	            }
+	            // Apply getter/setter descriptors
+	            descriptors.forEach(function (desc, key) {
+	                Object.defineProperty(result, key, desc);
+	            });
 	            return result;
 	        };
 	    };
-	    // [1,2,3]
+	    // [1,2,3, ...arr]
 	    Interpreter.prototype.arrayExpressionHandler = function (node) {
 	        var _this = this;
 	        //fix: [,,,1,2]
 	        var items = node.elements.map(function (element) {
-	            return element ? _this.createClosure(element) : element;
+	            if (!element)
+	                return null;
+	            // ES6: Spread element [...arr]
+	            if (element.type === 'SpreadElement') {
+	                return {
+	                    closure: _this.createClosure(element.argument),
+	                    isSpread: true,
+	                };
+	            }
+	            return {
+	                closure: _this.createClosure(element),
+	                isSpread: false,
+	            };
 	        });
 	        return function () {
-	            var len = items.length;
-	            var result = Array(len);
-	            for (var i = 0; i < len; i++) {
+	            var result = [];
+	            for (var i = 0; i < items.length; i++) {
 	                var item = items[i];
-	                if (item) {
-	                    result[i] = item();
+	                if (!item) {
+	                    // Preserve holes
+	                    result.length++;
+	                    continue;
+	                }
+	                if (item.isSpread) {
+	                    // ES6: Spread elements
+	                    var spreadValue = item.closure();
+	                    result.push.apply(result, spreadValue);
+	                }
+	                else {
+	                    result.push(item.closure());
 	                }
 	            }
 	            return result;
@@ -6222,13 +6348,35 @@
 	                };
 	        }
 	    };
-	    // func()
+	    // func(...args)
 	    Interpreter.prototype.callExpressionHandler = function (node) {
 	        var _this = this;
 	        var funcGetter = this.createCallFunctionGetter(node.callee);
-	        var argsGetter = node.arguments.map(function (arg) { return _this.createClosure(arg); });
+	        // ES6: Support spread in function calls
+	        var argsGetters = node.arguments.map(function (arg) {
+	            if (arg.type === 'SpreadElement') {
+	                return {
+	                    closure: _this.createClosure(arg.argument),
+	                    isSpread: true,
+	                };
+	            }
+	            return {
+	                closure: _this.createClosure(arg),
+	                isSpread: false,
+	            };
+	        });
 	        return function () {
-	            return funcGetter().apply(void 0, argsGetter.map(function (arg) { return arg(); }));
+	            var args = [];
+	            for (var _i = 0, argsGetters_1 = argsGetters; _i < argsGetters_1.length; _i++) {
+	                var getter = argsGetters_1[_i];
+	                if (getter.isSpread) {
+	                    args.push.apply(args, getter.closure());
+	                }
+	                else {
+	                    args.push(getter.closure());
+	                }
+	            }
+	            return funcGetter().apply(void 0, args);
 	        };
 	    };
 	    // var f = function() {...}
@@ -6242,7 +6390,10 @@
 	        this.collectDeclFuncs = Object.create(null);
 	        var name = node.id ? node.id.name : ""; /**anonymous*/
 	        var paramLength = node.params.length;
-	        var paramsGetter = node.params.map(function (param) { return _this.createParamNameGetter(param); });
+	        // ES6: Use createParamHandler for better ES6 support
+	        var paramsHandlers = node.params.map(function (param, index) {
+	            return _this.createParamHandler(param, index);
+	        });
 	        // set scope
 	        var bodyClosure = this.createClosure(node.body);
 	        var declVars = this.collectDeclVars;
@@ -6272,8 +6423,9 @@
 	                }
 	                // init arguments var
 	                currentScope.data["arguments"] = arguments;
-	                paramsGetter.forEach(function (getter, i) {
-	                    currentScope.data[getter()] = args[i];
+	                // ES6: Use param handlers for proper ES6 parameter support
+	                paramsHandlers.forEach(function (handler) {
+	                    handler(currentScope, args);
 	                });
 	                // init this
 	                var prevContext = self.getCurrentContext();
@@ -6314,6 +6466,358 @@
 	            return func;
 	        };
 	    };
+	    // ES6: Arrow function () => {...}
+	    Interpreter.prototype.arrowFunctionExpressionHandler = function (node) {
+	        var _this = this;
+	        var self = this;
+	        var source = this.source;
+	        var oldDeclVars = this.collectDeclVars;
+	        var oldDeclFuncs = this.collectDeclFuncs;
+	        this.collectDeclVars = Object.create(null);
+	        this.collectDeclFuncs = Object.create(null);
+	        var paramLength = node.params.length;
+	        var isExpression = node.expression; // true if body is expression, not block
+	        // Handle parameters (supports destructuring and default values)
+	        var paramsHandlers = node.params.map(function (param, index) {
+	            return _this.createParamHandler(param, index);
+	        });
+	        // Function body
+	        var bodyClosure = this.createClosure(node.body);
+	        var declVars = this.collectDeclVars;
+	        var declFuncs = this.collectDeclFuncs;
+	        this.collectDeclVars = oldDeclVars;
+	        this.collectDeclFuncs = oldDeclFuncs;
+	        return function () {
+	            // Capture the 'this' at definition time (arrow function's core feature)
+	            var capturedThis = self.getCurrentContext();
+	            var runtimeScope = self.getCurrentScope();
+	            var arrowFunc = function () {
+	                var args = [];
+	                for (var _i = 0; _i < arguments.length; _i++) {
+	                    args[_i] = arguments[_i];
+	                }
+	                self.callStack.push('(arrow)');
+	                var prevScope = self.getCurrentScope();
+	                var currentScope = createScope(runtimeScope, 'ArrowFunctionScope');
+	                self.setCurrentScope(currentScope);
+	                self.addDeclarationsToScope(declVars, declFuncs, currentScope);
+	                // Arrow functions don't have their own arguments
+	                // But we provide access to outer arguments through scope chain
+	                // Initialize parameters
+	                paramsHandlers.forEach(function (handler) {
+	                    handler(currentScope, args);
+	                });
+	                // Arrow function uses captured this (does NOT create new this)
+	                var prevContext = self.getCurrentContext();
+	                self.setCurrentContext(capturedThis);
+	                var result = bodyClosure();
+	                // Reset
+	                self.setCurrentContext(prevContext);
+	                self.setCurrentScope(prevScope);
+	                self.callStack.pop();
+	                // Expression body returns directly, block body needs Return unwrap
+	                if (isExpression) {
+	                    return result;
+	                }
+	                if (result instanceof Return) {
+	                    return result.value;
+	                }
+	            };
+	            Object.defineProperty(arrowFunc, 'length', {
+	                value: paramLength,
+	                writable: false,
+	                enumerable: false,
+	                configurable: true,
+	            });
+	            Object.defineProperty(arrowFunc, 'toString', {
+	                value: function () { return source.slice(node.start, node.end); },
+	                writable: true,
+	                configurable: true,
+	                enumerable: false,
+	            });
+	            return arrowFunc;
+	        };
+	    };
+	    // ES6: Parameter handler for functions (supports destructuring and defaults)
+	    Interpreter.prototype.createParamHandler = function (param, index) {
+	        var _this = this;
+	        if (param.type === 'Identifier') {
+	            // Simple parameter
+	            var name_2 = param.name;
+	            return function (scope, args) {
+	                scope.data[name_2] = args[index];
+	            };
+	        }
+	        else if (param.type === 'AssignmentPattern') {
+	            // Default parameter: (a = 1) => {}
+	            var defaultValueClosure_1 = this.createClosure(param.right);
+	            this.createParamHandler(param.left, index);
+	            return function (scope, args) {
+	                var value = args[index] === undefined ? defaultValueClosure_1() : args[index];
+	                // For simple identifier on left
+	                if (param.left.type === 'Identifier') {
+	                    scope.data[param.left.name] = value;
+	                }
+	                else {
+	                    _this.destructuringAssignment(param.left, value, 'let');
+	                }
+	            };
+	        }
+	        else if (param.type === 'RestElement') {
+	            // Rest parameter: (...args) => {}
+	            return function (scope, args) {
+	                var rest = args.slice(index);
+	                if (param.argument.type === 'Identifier') {
+	                    scope.data[param.argument.name] = rest;
+	                }
+	                else {
+	                    _this.destructuringAssignment(param.argument, rest, 'let');
+	                }
+	            };
+	        }
+	        else {
+	            // Destructuring parameter: ({a, b}) => {}
+	            return function (scope, args) {
+	                _this.destructuringAssignment(param, args[index], 'let');
+	            };
+	        }
+	    };
+	    // ES6: Template literal `Hello ${name}`
+	    Interpreter.prototype.templateLiteralHandler = function (node) {
+	        var _this = this;
+	        var quasis = node.quasis;
+	        var expressionClosures = node.expressions.map(function (expr) { return _this.createClosure(expr); });
+	        return function () {
+	            var result = '';
+	            for (var i = 0; i < quasis.length; i++) {
+	                result += quasis[i].value.cooked || '';
+	                if (i < expressionClosures.length) {
+	                    result += String(expressionClosures[i]());
+	                }
+	            }
+	            return result;
+	        };
+	    };
+	    // ES6: Tagged template expression tag`template`
+	    Interpreter.prototype.taggedTemplateExpressionHandler = function (node) {
+	        var _this = this;
+	        var tagClosure = this.createClosure(node.tag);
+	        var quasis = node.quasi.quasis;
+	        var expressionClosures = node.quasi.expressions.map(function (expr) { return _this.createClosure(expr); });
+	        return function () {
+	            var tag = tagClosure();
+	            // Build strings array with raw property
+	            var strings = quasis.map(function (q) { return q.value.cooked; });
+	            strings.raw = quasis.map(function (q) { return q.value.raw; });
+	            Object.freeze(strings);
+	            Object.freeze(strings.raw);
+	            // Get expression values
+	            var values = expressionClosures.map(function (closure) { return closure(); });
+	            return tag.apply(void 0, __spreadArray([strings], values, false));
+	        };
+	    };
+	    // ES6: for...of statement
+	    Interpreter.prototype.forOfStatementHandler = function (node) {
+	        var _this = this;
+	        var leftPattern;
+	        var declKind = 'assign';
+	        if (node.left.type === 'VariableDeclaration') {
+	            declKind = (node.left.kind || 'var');
+	            leftPattern = node.left.declarations[0].id;
+	            // Handle var hoisting
+	            if (declKind === 'var' && leftPattern.type === 'Identifier') {
+	                this.varDeclaration(leftPattern.name);
+	            }
+	        }
+	        else {
+	            leftPattern = node.left;
+	        }
+	        var rightClosure = this.createClosure(node.right);
+	        var bodyClosure = this.createClosure(node.body);
+	        return function (pNode) {
+	            var labelName;
+	            var result = EmptyStatementReturn;
+	            if (pNode && pNode.type === 'LabeledStatement') {
+	                labelName = pNode.label.name;
+	            }
+	            var iterable = rightClosure();
+	            if (iterable == null || typeof iterable[Symbol.iterator] !== 'function') {
+	                throw _this.createInternalThrowError(messages_1.Messages.NotIterable, typeof iterable, node);
+	            }
+	            var iterator = iterable[Symbol.iterator]();
+	            var needsBlockScope = declKind === 'let' || declKind === 'const';
+	            var iterResult = iterator.next();
+	            while (!iterResult.done) {
+	                var value = iterResult.value;
+	                // Create new block scope for each iteration (for closure capture)
+	                var iterScope = null;
+	                if (needsBlockScope) {
+	                    iterScope = new Scope(Object.create(null), _this.getCurrentScope(), 'ForOfBlockScope', true);
+	                    _this.setCurrentScope(iterScope);
+	                }
+	                try {
+	                    // Assign to iteration variable
+	                    _this.destructuringAssignment(leftPattern, value, declKind);
+	                    var ret = _this.setValue(bodyClosure());
+	                    if (ret === EmptyStatementReturn || ret === Continue) {
+	                        iterResult = iterator.next();
+	                        continue;
+	                    }
+	                    if (ret === Break)
+	                        break;
+	                    result = ret;
+	                    if (result instanceof ContinueLabel && result.value === labelName) {
+	                        result = EmptyStatementReturn;
+	                        iterResult = iterator.next();
+	                        continue;
+	                    }
+	                    if (result instanceof BreakLabel && result.value === labelName) {
+	                        result = EmptyStatementReturn;
+	                        break;
+	                    }
+	                    if (result instanceof Return || result instanceof BreakLabel || result instanceof ContinueLabel) {
+	                        break;
+	                    }
+	                }
+	                finally {
+	                    if (iterScope) {
+	                        _this.setCurrentScope(iterScope.parent);
+	                    }
+	                }
+	                iterResult = iterator.next();
+	            }
+	            return result;
+	        };
+	    };
+	    // ES6: Spread element handler (for standalone use)
+	    Interpreter.prototype.spreadElementHandler = function (node) {
+	        var argumentClosure = this.createClosure(node.argument);
+	        return function () { return argumentClosure(); };
+	    };
+	    // ES6: Class declaration
+	    Interpreter.prototype.classDeclarationHandler = function (node) {
+	        if (node.id) {
+	            var classClosure = this.classExpressionHandler(node);
+	            this.funcDeclaration(node.id.name, classClosure);
+	        }
+	        return function () { return EmptyStatementReturn; };
+	    };
+	    // ES6: Class expression
+	    Interpreter.prototype.classExpressionHandler = function (node) {
+	        var _a;
+	        var className = ((_a = node.id) === null || _a === void 0 ? void 0 : _a.name) || '';
+	        // Handle superclass
+	        var superClassClosure = node.superClass
+	            ? this.createClosure(node.superClass)
+	            : null;
+	        // Process class body
+	        var body = node.body.body;
+	        var constructorMethod = body.find(function (m) { return m.type === 'MethodDefinition' && m.kind === 'constructor'; });
+	        var instanceMethods = [];
+	        for (var _i = 0, body_1 = body; _i < body_1.length; _i++) {
+	            var method = body_1[_i];
+	            if (method.type !== 'MethodDefinition')
+	                continue;
+	            if (method.kind === 'constructor')
+	                continue;
+	            var keyGetter = this.getPropertyKeyGetter(method.key, method.computed);
+	            instanceMethods.push({
+	                key: keyGetter,
+	                kind: method.kind,
+	                closure: this.functionExpressionHandler(method.value),
+	                isStatic: method.static || false,
+	            });
+	        }
+	        // Pre-compile constructor
+	        var constructorClosure = constructorMethod
+	            ? this.functionExpressionHandler(constructorMethod.value)
+	            : null;
+	        return function () {
+	            var SuperClass = superClassClosure ? superClassClosure() : null;
+	            // Create class constructor function
+	            var ClassConstructor;
+	            if (constructorClosure) {
+	                var constructorFunc_1 = constructorClosure();
+	                ClassConstructor = function () {
+	                    var args = [];
+	                    for (var _i = 0; _i < arguments.length; _i++) {
+	                        args[_i] = arguments[_i];
+	                    }
+	                    // Check if called without new
+	                    if (!(this instanceof ClassConstructor)) {
+	                        throw new TypeError("Class constructor cannot be invoked without 'new'");
+	                    }
+	                    return constructorFunc_1.apply(this, args);
+	                };
+	            }
+	            else if (SuperClass) {
+	                ClassConstructor = function () {
+	                    var args = [];
+	                    for (var _i = 0; _i < arguments.length; _i++) {
+	                        args[_i] = arguments[_i];
+	                    }
+	                    if (!(this instanceof ClassConstructor)) {
+	                        throw new TypeError("Class constructor cannot be invoked without 'new'");
+	                    }
+	                    return SuperClass.apply(this, args);
+	                };
+	            }
+	            else {
+	                ClassConstructor = function () {
+	                    if (!(this instanceof ClassConstructor)) {
+	                        throw new TypeError("Class constructor cannot be invoked without 'new'");
+	                    }
+	                };
+	            }
+	            // Set up inheritance
+	            if (SuperClass) {
+	                ClassConstructor.prototype = Object.create(SuperClass.prototype);
+	                ClassConstructor.prototype.constructor = ClassConstructor;
+	                Object.setPrototypeOf(ClassConstructor, SuperClass);
+	            }
+	            // Add methods
+	            for (var _i = 0, instanceMethods_1 = instanceMethods; _i < instanceMethods_1.length; _i++) {
+	                var _a = instanceMethods_1[_i], key = _a.key, kind = _a.kind, closure = _a.closure, isStatic = _a.isStatic;
+	                var method = closure();
+	                var keyName = key();
+	                var target = isStatic ? ClassConstructor : ClassConstructor.prototype;
+	                if (kind === 'method') {
+	                    target[keyName] = method;
+	                }
+	                else {
+	                    // getter or setter
+	                    var descriptor = Object.getOwnPropertyDescriptor(target, keyName) || {
+	                        configurable: true,
+	                        enumerable: false,
+	                    };
+	                    descriptor[kind] = method;
+	                    Object.defineProperty(target, keyName, descriptor);
+	                }
+	            }
+	            defineFunctionName(ClassConstructor, className);
+	            return ClassConstructor;
+	        };
+	    };
+	    // ES6: Helper to get property key getter (for computed keys)
+	    Interpreter.prototype.getPropertyKeyGetter = function (key, computed) {
+	        if (computed) {
+	            var keyClosure_2 = this.createClosure(key);
+	            return function () { return String(keyClosure_2()); };
+	        }
+	        if (key.type === 'Identifier') {
+	            return function () { return key.name; };
+	        }
+	        return function () { return String(key.value); };
+	    };
+	    // ES6: Super expression handler
+	    Interpreter.prototype.superHandler = function (node) {
+	        var _this = this;
+	        return function () {
+	            // This is a placeholder - super needs special handling in method calls
+	            // The actual super behavior is implemented in the class constructor and methods
+	            throw _this.createInternalThrowError(messages_1.Messages.SuperNotAllowed, '', node);
+	        };
+	    };
 	    // new Ctrl()
 	    Interpreter.prototype.newExpressionHandler = function (node) {
 	        var _this = this;
@@ -6324,8 +6828,8 @@
 	            var construct = expression();
 	            if (!isFunction(construct) || construct.__IS_EVAL_FUNC) {
 	                var callee = node.callee;
-	                var name_2 = source.slice(callee.start, callee.end);
-	                throw _this.createInternalThrowError(messages_1.Messages.IsNotConstructor, name_2, node);
+	                var name_3 = source.slice(callee.start, callee.end);
+	                throw _this.createInternalThrowError(messages_1.Messages.IsNotConstructor, name_3, node);
 	            }
 	            // new Function(...)
 	            if (construct.__IS_FUNCTION_FUNC) {
@@ -6377,6 +6881,11 @@
 	        var _this = this;
 	        return function () {
 	            var currentScope = _this.getCurrentScope();
+	            // ES6: TDZ (Temporal Dead Zone) check for let/const
+	            var meta = currentScope.getVariableMeta(node.name);
+	            if (meta && (meta.kind === 'let' || meta.kind === 'const') && !meta.initialized) {
+	                throw _this.createInternalThrowError(messages_1.Messages.TDZReferenceError, node.name, node);
+	            }
 	            var data = _this.getScopeDataFromName(node.name, currentScope);
 	            _this.assertVariable(data, node.name, node);
 	            return data[node.name];
@@ -6390,6 +6899,15 @@
 	    // a=1 a+=2
 	    Interpreter.prototype.assignmentExpressionHandler = function (node) {
 	        var _this = this;
+	        // ES6: Handle destructuring assignment
+	        if (node.left.type === 'ArrayPattern' || node.left.type === 'ObjectPattern') {
+	            var rightValueGetter_1 = this.createClosure(node.right);
+	            return function () {
+	                var value = rightValueGetter_1();
+	                _this.destructuringAssignment(node.left, value, 'assign');
+	                return value;
+	            };
+	        }
 	        // var s = function(){}
 	        // s.name === s
 	        if (node.left.type === "Identifier" &&
@@ -6407,6 +6925,14 @@
 	            var data = dataGetter();
 	            var name = nameGetter();
 	            var rightValue = rightValueGetter();
+	            // ES6: Check const reassignment for Identifier
+	            if (node.left.type === 'Identifier') {
+	                var currentScope = _this.getCurrentScope();
+	                var scope = _this.getScopeFromName(name, currentScope);
+	                if (!scope.canAssign(name)) {
+	                    throw _this.createInternalThrowError(messages_1.Messages.ConstReassignment, name, node);
+	                }
+	            }
 	            if (node.operator !== "=") {
 	                // if a is undefined
 	                // a += 1
@@ -6470,34 +6996,77 @@
 	    };
 	    // var i;
 	    // var i=1;
+	    // let i=1;
+	    // const i=1;
 	    Interpreter.prototype.variableDeclarationHandler = function (node) {
 	        var _this = this;
-	        var assignmentsClosure;
-	        var assignments = [];
-	        for (var i = 0; i < node.declarations.length; i++) {
-	            var decl = node.declarations[i];
-	            this.varDeclaration(this.getVariableName(decl.id));
-	            if (decl.init) {
-	                assignments.push({
-	                    type: "AssignmentExpression",
-	                    operator: "=",
-	                    left: decl.id,
-	                    right: decl.init,
+	        var kind = node.kind || 'var';
+	        // For var declarations, use existing hoisting logic
+	        if (kind === 'var') {
+	            var assignmentsClosure_1;
+	            var assignments = [];
+	            for (var i = 0; i < node.declarations.length; i++) {
+	                var decl = node.declarations[i];
+	                this.varDeclaration(this.getVariableName(decl.id));
+	                if (decl.init) {
+	                    assignments.push({
+	                        type: "AssignmentExpression",
+	                        operator: "=",
+	                        left: decl.id,
+	                        right: decl.init,
+	                    });
+	                }
+	            }
+	            if (assignments.length) {
+	                assignmentsClosure_1 = this.createClosure({
+	                    type: "BlockStatement",
+	                    body: assignments,
 	                });
 	            }
+	            return function () {
+	                if (assignmentsClosure_1) {
+	                    var oldValue = _this.isVarDeclMode;
+	                    _this.isVarDeclMode = true;
+	                    assignmentsClosure_1();
+	                    _this.isVarDeclMode = oldValue;
+	                }
+	                return EmptyStatementReturn;
+	            };
 	        }
-	        if (assignments.length) {
-	            assignmentsClosure = this.createClosure({
-	                type: "BlockStatement",
-	                body: assignments,
+	        // For let/const declarations (ES6+)
+	        var declarations = [];
+	        for (var i = 0; i < node.declarations.length; i++) {
+	            var decl = node.declarations[i];
+	            // const must have initializer
+	            if (kind === 'const' && !decl.init) {
+	                throw this.createInternalThrowError(messages_1.Messages.ConstWithoutInitializer, '', node);
+	            }
+	            declarations.push({
+	                pattern: decl.id,
+	                initClosure: decl.init ? this.createClosure(decl.init) : null,
 	            });
 	        }
 	        return function () {
-	            if (assignmentsClosure) {
-	                var oldValue = _this.isVarDeclMode;
-	                _this.isVarDeclMode = true;
-	                assignmentsClosure();
-	                _this.isVarDeclMode = oldValue;
+	            var currentScope = _this.getCurrentScope();
+	            for (var _i = 0, declarations_1 = declarations; _i < declarations_1.length; _i++) {
+	                var _a = declarations_1[_i], pattern = _a.pattern, initClosure = _a.initClosure;
+	                var value = initClosure ? initClosure() : undefined;
+	                // Handle simple identifier pattern
+	                if (pattern.type === 'Identifier') {
+	                    var name_4 = pattern.name;
+	                    // Check for redeclaration in same scope
+	                    // Note: TDZ pre-declaration sets initialized: false, so we check if already initialized
+	                    var existingMeta = currentScope.varMeta.get(name_4);
+	                    if (existingMeta && existingMeta.initialized) {
+	                        throw _this.createInternalThrowError(messages_1.Messages.VariableRedeclaration, name_4, node);
+	                    }
+	                    currentScope.data[name_4] = value;
+	                    currentScope.varMeta.set(name_4, { kind: kind, initialized: true });
+	                }
+	                else {
+	                    // Handle destructuring patterns (will be implemented in phase 3)
+	                    _this.destructuringAssignment(pattern, value, kind);
+	                }
 	            }
 	            return EmptyStatementReturn;
 	        };
@@ -6510,30 +7079,64 @@
 	    // {...}
 	    Interpreter.prototype.programHandler = function (node) {
 	        var _this = this;
-	        // const currentScope = this.getCurrentScope();
+	        var isBlock = node.type === 'BlockStatement';
+	        // ES6: Collect block-scoped declarations (let/const)
+	        var blockDeclarations = [];
+	        if (isBlock) {
+	            for (var _i = 0, _a = node.body; _i < _a.length; _i++) {
+	                var stmt = _a[_i];
+	                if (stmt.type === 'VariableDeclaration' && (stmt.kind === 'let' || stmt.kind === 'const')) {
+	                    for (var _b = 0, _c = stmt.declarations; _b < _c.length; _b++) {
+	                        var decl = _c[_b];
+	                        if (decl.id.type === 'Identifier') {
+	                            blockDeclarations.push(decl.id.name);
+	                        }
+	                        // For destructuring patterns, will be handled during execution
+	                    }
+	                }
+	            }
+	        }
 	        var stmtClosures = node.body.map(function (stmt) {
-	            // if (stmt.type === "EmptyStatement") return null;
 	            return _this.createClosure(stmt);
 	        });
 	        return function () {
 	            var result = EmptyStatementReturn;
-	            for (var i = 0; i < stmtClosures.length; i++) {
-	                var stmtClosure = stmtClosures[i];
-	                // save last value
-	                var ret = _this.setValue(stmtClosure());
-	                // if (!stmtClosure) continue;
-	                // EmptyStatement
-	                if (ret === EmptyStatementReturn)
-	                    continue;
-	                result = ret;
-	                // BlockStatement: break label;  continue label; for(){ break ... }
-	                // ReturnStatement: return xx;
-	                if (result instanceof Return ||
-	                    result instanceof BreakLabel ||
-	                    result instanceof ContinueLabel ||
-	                    result === Break ||
-	                    result === Continue) {
-	                    break;
+	            var blockScope = null;
+	            // ES6: Create block scope for BlockStatement with let/const declarations
+	            if (isBlock && blockDeclarations.length > 0) {
+	                var currentScope = _this.getCurrentScope();
+	                blockScope = new Scope(Object.create(null), currentScope, 'BlockScope', true);
+	                _this.setCurrentScope(blockScope);
+	                // Pre-declare variables for TDZ (uninitialized)
+	                for (var _i = 0, blockDeclarations_1 = blockDeclarations; _i < blockDeclarations_1.length; _i++) {
+	                    var name_5 = blockDeclarations_1[_i];
+	                    blockScope.varMeta.set(name_5, { kind: 'let', initialized: false });
+	                }
+	            }
+	            try {
+	                for (var i = 0; i < stmtClosures.length; i++) {
+	                    var stmtClosure = stmtClosures[i];
+	                    // save last value
+	                    var ret = _this.setValue(stmtClosure());
+	                    // EmptyStatement
+	                    if (ret === EmptyStatementReturn)
+	                        continue;
+	                    result = ret;
+	                    // BlockStatement: break label;  continue label; for(){ break ... }
+	                    // ReturnStatement: return xx;
+	                    if (result instanceof Return ||
+	                        result instanceof BreakLabel ||
+	                        result instanceof ContinueLabel ||
+	                        result === Break ||
+	                        result === Continue) {
+	                        break;
+	                    }
+	                }
+	            }
+	            finally {
+	                // Restore scope
+	                if (blockScope) {
+	                    _this.setCurrentScope(blockScope.parent);
 	                }
 	            }
 	            // save last value
@@ -6568,15 +7171,30 @@
 	        return this.ifStatementHandler(node);
 	    };
 	    // for(var i = 0; i < 10; i++) {...}
+	    // for(let i = 0; i < 10; i++) {...}  - ES6: creates new binding per iteration
 	    Interpreter.prototype.forStatementHandler = function (node) {
 	        var _this = this;
 	        var initClosure = noop;
 	        var testClosure = node.test ? this.createClosure(node.test) : function () { return true; };
 	        var updateClosure = noop;
 	        var bodyClosure = this.createClosure(node.body);
+	        // ES6: Check if we have let/const in for init
+	        var letConstVars = [];
+	        var isLetConst = false;
 	        if (node.type === "ForStatement") {
 	            initClosure = node.init ? this.createClosure(node.init) : initClosure;
 	            updateClosure = node.update ? this.createClosure(node.update) : noop;
+	            // Check for let/const in init
+	            if (node.init && node.init.type === 'VariableDeclaration' &&
+	                (node.init.kind === 'let' || node.init.kind === 'const')) {
+	                isLetConst = true;
+	                for (var _i = 0, _a = node.init.declarations; _i < _a.length; _i++) {
+	                    var decl = _a[_i];
+	                    if (decl.id.type === 'Identifier') {
+	                        letConstVars.push(decl.id.name);
+	                    }
+	                }
+	            }
 	        }
 	        return function (pNode) {
 	            var labelName;
@@ -6585,26 +7203,65 @@
 	            if (pNode && pNode.type === "LabeledStatement") {
 	                labelName = pNode.label.name;
 	            }
-	            for (initClosure(); shouldInitExec || testClosure(); updateClosure()) {
-	                shouldInitExec = false;
-	                // save last value
-	                var ret = _this.setValue(bodyClosure());
-	                // notice: never return Break or Continue!
-	                if (ret === EmptyStatementReturn || ret === Continue)
-	                    continue;
-	                if (ret === Break) {
-	                    break;
+	            // ES6: For let/const, create a scope for the entire for statement
+	            var forScope = null;
+	            if (isLetConst) {
+	                forScope = new Scope(Object.create(null), _this.getCurrentScope(), 'ForLetScope', true);
+	                _this.setCurrentScope(forScope);
+	            }
+	            try {
+	                initClosure();
+	                while (shouldInitExec || testClosure()) {
+	                    shouldInitExec = false;
+	                    // ES6: For let/const, create a new scope for each iteration
+	                    // and copy current values of loop variables
+	                    var iterScope = null;
+	                    if (isLetConst && forScope) {
+	                        iterScope = new Scope(Object.create(null), forScope, 'ForIterScope', true);
+	                        // Copy current values of let/const variables to iteration scope
+	                        for (var _i = 0, letConstVars_1 = letConstVars; _i < letConstVars_1.length; _i++) {
+	                            var varName = letConstVars_1[_i];
+	                            iterScope.data[varName] = forScope.data[varName];
+	                            iterScope.varMeta.set(varName, { kind: 'let', initialized: true });
+	                        }
+	                        _this.setCurrentScope(iterScope);
+	                    }
+	                    // save last value
+	                    var ret = _this.setValue(bodyClosure());
+	                    // ES6: Copy back the values to the for scope for the next iteration
+	                    if (isLetConst && iterScope && forScope) {
+	                        for (var _a = 0, letConstVars_2 = letConstVars; _a < letConstVars_2.length; _a++) {
+	                            var varName = letConstVars_2[_a];
+	                            forScope.data[varName] = iterScope.data[varName];
+	                        }
+	                        _this.setCurrentScope(forScope);
+	                    }
+	                    // notice: never return Break or Continue!
+	                    if (ret === EmptyStatementReturn || ret === Continue) {
+	                        updateClosure();
+	                        continue;
+	                    }
+	                    if (ret === Break) {
+	                        break;
+	                    }
+	                    result = ret;
+	                    // stop continue label
+	                    if (result instanceof ContinueLabel && result.value === labelName) {
+	                        result = EmptyStatementReturn;
+	                        updateClosure();
+	                        continue;
+	                    }
+	                    if (result instanceof Return ||
+	                        result instanceof BreakLabel ||
+	                        result instanceof ContinueLabel) {
+	                        break;
+	                    }
+	                    updateClosure();
 	                }
-	                result = ret;
-	                // stop continue label
-	                if (result instanceof ContinueLabel && result.value === labelName) {
-	                    result = EmptyStatementReturn;
-	                    continue;
-	                }
-	                if (result instanceof Return ||
-	                    result instanceof BreakLabel ||
-	                    result instanceof ContinueLabel) {
-	                    break;
+	            }
+	            finally {
+	                if (forScope) {
+	                    _this.setCurrentScope(forScope.parent);
 	                }
 	            }
 	            return result;
@@ -6908,10 +7565,28 @@
 	            return EmptyStatementReturn;
 	        };
 	    };
-	    // get es3/5 param name
+	    // get es3/5 param name (for ES6 patterns, use createParamHandler instead)
 	    Interpreter.prototype.createParamNameGetter = function (node) {
 	        if (node.type === "Identifier") {
 	            return function () { return node.name; };
+	        }
+	        else if (node.type === "RestElement") {
+	            // ES6: Rest parameter (...args)
+	            if (node.argument.type === "Identifier") {
+	                return function () { return node.argument.name; };
+	            }
+	            throw this.createInternalThrowError(messages_1.Messages.ParamTypeSyntaxError, node.type, node);
+	        }
+	        else if (node.type === "AssignmentPattern") {
+	            // ES6: Default parameter (a = 1)
+	            if (node.left.type === "Identifier") {
+	                return function () { return node.left.name; };
+	            }
+	            throw this.createInternalThrowError(messages_1.Messages.ParamTypeSyntaxError, node.type, node);
+	        }
+	        else if (node.type === "ObjectPattern" || node.type === "ArrayPattern") {
+	            // ES6: Destructuring parameter - return a placeholder, actual handling in function body
+	            return function () { return "__destructure_".concat(Math.random().toString(36).slice(2)); };
 	        }
 	        else {
 	            throw this.createInternalThrowError(messages_1.Messages.ParamTypeSyntaxError, node.type, node);
@@ -6970,6 +7645,130 @@
 	        var context = this.collectDeclFuncs;
 	        context[name] = func;
 	    };
+	    // ES6: Destructuring assignment handler
+	    Interpreter.prototype.destructuringAssignment = function (pattern, value, kind) {
+	        if (kind === void 0) { kind = 'assign'; }
+	        var currentScope = this.getCurrentScope();
+	        switch (pattern.type) {
+	            case 'Identifier':
+	                var name_6 = pattern.name;
+	                if (kind === 'assign') {
+	                    // Regular assignment
+	                    var scope = this.getScopeFromName(name_6, currentScope);
+	                    // Check const reassignment
+	                    if (!scope.canAssign(name_6)) {
+	                        throw this.createInternalThrowError(messages_1.Messages.ConstReassignment, name_6, pattern);
+	                    }
+	                    scope.data[name_6] = value;
+	                }
+	                else {
+	                    // Declaration (let/const/var)
+	                    if (kind === 'var') {
+	                        var targetScope = currentScope.findFunctionScope();
+	                        targetScope.data[name_6] = value;
+	                        targetScope.varMeta.set(name_6, { kind: kind, initialized: true });
+	                    }
+	                    else {
+	                        // Check for redeclaration - but allow TDZ pre-declaration (initialized: false)
+	                        var existingMeta = currentScope.varMeta.get(name_6);
+	                        if (existingMeta && existingMeta.initialized) {
+	                            throw this.createInternalThrowError(messages_1.Messages.VariableRedeclaration, name_6, pattern);
+	                        }
+	                        currentScope.data[name_6] = value;
+	                        currentScope.varMeta.set(name_6, { kind: kind, initialized: true });
+	                    }
+	                }
+	                break;
+	            case 'ArrayPattern':
+	                this.destructureArray(pattern, value, kind);
+	                break;
+	            case 'ObjectPattern':
+	                this.destructureObject(pattern, value, kind);
+	                break;
+	            case 'AssignmentPattern':
+	                // Default value: const { a = 1 } = obj
+	                var actualValue = value === undefined
+	                    ? this.createClosure(pattern.right)()
+	                    : value;
+	                this.destructuringAssignment(pattern.left, actualValue, kind);
+	                break;
+	            case 'RestElement':
+	                this.destructuringAssignment(pattern.argument, value, kind);
+	                break;
+	            case 'MemberExpression':
+	                // Destructure to object property: [a.b] = [1]
+	                var obj = this.createClosure(pattern.object)();
+	                var key = pattern.computed
+	                    ? this.createClosure(pattern.property)()
+	                    : pattern.property.name;
+	                obj[key] = value;
+	                break;
+	            default:
+	                throw this.createInternalThrowError(messages_1.Messages.AssignmentTypeSyntaxError, pattern.type, pattern);
+	        }
+	    };
+	    // ES6: Array destructuring
+	    Interpreter.prototype.destructureArray = function (pattern, value, kind) {
+	        if (value == null) {
+	            throw this.createInternalThrowError(messages_1.Messages.NotIterable, String(value), pattern);
+	        }
+	        var iterator = value[Symbol.iterator] ? value[Symbol.iterator]() : null;
+	        if (!iterator) {
+	            throw this.createInternalThrowError(messages_1.Messages.NotIterable, typeof value, pattern);
+	        }
+	        for (var i = 0; i < pattern.elements.length; i++) {
+	            var element = pattern.elements[i];
+	            if (!element) {
+	                // Skip holes: [,a] = [1,2]
+	                iterator.next();
+	                continue;
+	            }
+	            if (element.type === 'RestElement') {
+	                // Rest element: [a, ...rest] = [1,2,3]
+	                var rest = [];
+	                var next = iterator.next();
+	                while (!next.done) {
+	                    rest.push(next.value);
+	                    next = iterator.next();
+	                }
+	                this.destructuringAssignment(element.argument, rest, kind);
+	            }
+	            else {
+	                var _a = iterator.next(), itemValue = _a.value, done = _a.done;
+	                this.destructuringAssignment(element, done ? undefined : itemValue, kind);
+	            }
+	        }
+	    };
+	    // ES6: Object destructuring
+	    Interpreter.prototype.destructureObject = function (pattern, value, kind) {
+	        if (value == null) {
+	            throw this.createInternalThrowError(messages_1.Messages.NotIterable, String(value), pattern);
+	        }
+	        var assignedKeys = new Set();
+	        for (var _i = 0, _a = pattern.properties; _i < _a.length; _i++) {
+	            var prop = _a[_i];
+	            if (prop.type === 'RestElement') {
+	                // Rest property: const { a, ...rest } = obj
+	                var rest = {};
+	                for (var key in value) {
+	                    if (!assignedKeys.has(key)) {
+	                        rest[key] = value[key];
+	                    }
+	                }
+	                this.destructuringAssignment(prop.argument, rest, kind);
+	            }
+	            else {
+	                // Regular property
+	                var property = prop;
+	                var key = property.computed
+	                    ? this.createClosure(property.key)()
+	                    : property.key.name || property.key.value;
+	                assignedKeys.add(String(key));
+	                var propValue = value[key];
+	                this.destructuringAssignment(property.value, propValue, kind);
+	            }
+	        }
+	    };
 	    Interpreter.prototype.addDeclarationsToScope = function (declVars, declFuncs, scope) {
 	        var scopeData = scope.data;
 	        for (var key in declFuncs) {
@@ -7019,7 +7818,7 @@
 	    Interpreter.version = version;
 	    Interpreter.eval = internalEval;
 	    Interpreter.Function = internalFunction;
-	    Interpreter.ecmaVersion = 5;
+	    Interpreter.ecmaVersion = 6;
 	    // alert.call(globalContextInFunction, 1);
 	    // fix: alert.call({}, 1); // Illegal invocation
 	    // function func(){
@@ -7030,11 +7829,15 @@
 	    Interpreter.global = Object.create(null);
 	    return Interpreter;
 	}());
+	main.Interpreter = Interpreter;
 
 	var vm = {};
 
 	Object.defineProperty(vm, "__esModule", { value: true });
-	vm.Script = vm.runInNewContext = vm.runInContext = vm.compileFunction = vm.createContext = void 0;
+	vm.Script = vm.runInNewContext = void 0;
+	vm.createContext = createContext;
+	vm.compileFunction = compileFunction;
+	vm.runInContext = runInContext;
 	var main_1 = main;
 	// TODO:
 	// add tests
@@ -7042,7 +7845,6 @@
 	    if (ctx === void 0) { ctx = Object.create(null); }
 	    return ctx;
 	}
-	vm.createContext = createContext;
 	function compileFunction(code, params, options) {
 	    if (params === void 0) { params = []; }
 	    if (options === void 0) { options = {}; }
@@ -7057,12 +7859,10 @@
 	    });
 	    return interpreter.evaluate(wrapCode);
 	}
-	vm.compileFunction = compileFunction;
 	function runInContext(code, ctx, options) {
 	    var interpreter = new main_1.Interpreter(ctx, options);
 	    return interpreter.evaluate(code);
 	}
-	vm.runInContext = runInContext;
 	vm.runInNewContext = runInContext;
 	var Script = /** @class */ (function () {
 	    function Script(code) {
@@ -7089,6 +7889,7 @@
 	var _Function = {};
 
 	Object.defineProperty(_Function, "__esModule", { value: true });
+	_Function.default = default_1;
 	var vm_1 = vm;
 	function default_1() {
 	    var args = [];
@@ -7098,19 +7899,18 @@
 	    var code = args.pop();
 	    return (0, vm_1.compileFunction)(code || "", args);
 	}
-	_Function.default = default_1;
 
-	(function (exports) {
-		Object.defineProperty(exports, "__esModule", { value: true });
-		exports.Function = exports.evaluate = exports.vm = exports.Interpreter = void 0;
+	(function (exports$1) {
+		Object.defineProperty(exports$1, "__esModule", { value: true });
+		exports$1.Function = exports$1.evaluate = exports$1.vm = exports$1.Interpreter = void 0;
 		var main_1 = main;
-		Object.defineProperty(exports, "Interpreter", { enumerable: true, get: function () { return main_1.Interpreter; } });
+		Object.defineProperty(exports$1, "Interpreter", { enumerable: true, get: function () { return main_1.Interpreter; } });
 		var vm$1 = vm;
-		exports.vm = vm$1;
+		exports$1.vm = vm$1;
 		var evaluate_1 = evaluate;
-		exports.evaluate = evaluate_1.default;
+		exports$1.evaluate = evaluate_1.default;
 		var Function_1 = _Function;
-		exports.Function = Function_1.default; 
+		exports$1.Function = Function_1.default; 
 	} (umd$1));
 
 	var umd = /*@__PURE__*/getDefaultExportFromCjs(umd$1);

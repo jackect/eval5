@@ -23,7 +23,23 @@
 
 ## 支持 ECMAScript 版本
 
-ES5
+ES5 / ES6 (部分)
+
+### ES6 新增特性
+
+- `let` / `const` 声明（支持块级作用域和暂时性死区 TDZ）
+- 箭头函数 `() => {}`
+- 模板字符串 `` `Hello ${name}` ``
+- 标签模板字符串
+- 解构赋值（数组/对象解构）
+- 默认参数 `function(a = 1) {}`
+- 剩余参数 `function(...args) {}`
+- 展开运算符 `[...arr]`, `{...obj}`, `func(...args)`
+- `for...of` 循环
+- 简写属性 `{x, y}`
+- 计算属性名 `{[key]: value}`
+- 方法简写 `{method() {}}`
+- 类 `class` 声明和表达式（支持 `extends` 和 `super`）
 
 ## 安装
 
